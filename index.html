@@ -390,13 +390,17 @@
   };
   const BANK_AMBUSH = 0.02;   // extra bandit chance on riverbanks
   // A river merchant stays for the rest of that player's turn and makes up to 3 trades.
-  const MERCHANT_TRADES = 3;
+  const MERCHANT_TRADES = 5;
   const TRADES = [
-    { name: 'Sack of grain',  give: { gold: 1 }, get: { food: 4 } },
+    { name: 'Sack of grain',  give: { gold: 2 }, get: { food: 5 } },
+    { name: 'Wheat seeds',    give: { gold: 2 }, get: {}, items: { seed: 5 } },
     { name: 'Bundle of logs', give: { gold: 1 }, get: { wood: 3 } },
     { name: 'Cut stone',      give: { gold: 2 }, get: { stone: 3 } },
     { name: 'Supply crate',   give: { gold: 2 }, get: { food: 3, wood: 2, stone: 1 } },
+    { name: 'Food crate',     give: { gold: 10 }, get: {}, crate: true },   // nobody eats at this turn's upkeep
   ];
+  const tradeGets = tr => [costText(tr.get), ...Object.entries(tr.items || {}).map(([k, n]) => `${n} ${ITEMS[k].name.toLowerCase()}`), tr.crate ? 'skip this upkeep' : ''].filter(Boolean).join(', ');
+  const tradeWhy = tr => tr.crate && P().feast ? 'Upkeep is already covered this turn.' : null;
   // Single-use tools: the carrier gathers twice the next time it works a matching tile.
   const ITEMS = {
     axe:       { name: 'Worn-out axe',    short: 'axe',          tiles: ['forest'],         where: 'a forest',              desc: 'Single use: gather twice on a forest.' },
@@ -3284,11 +3288,13 @@
   }
   function trade(i) {
     const m = P().merchant, tr = TRADES[i];
-    if (!m || m.left <= 0 || !affordable(tr.give)) return;
+    if (!m || m.left <= 0 || !affordable(tr.give) || tradeWhy(tr)) return;
     pay(tr.give); refund(tr.get);
+    Object.entries(tr.items || {}).forEach(([k, n]) => { items[k] += n; });
+    if (tr.crate) { P().feast = true; P().feastWhy = 'crate'; }
     m.left--;
     undoStack.push({ type: 'trade', i });
-    say(`Traded ${costText(tr.give)} for ${costText(tr.get)}.${m.left ? ` The merchant will make ${m.left} more trade${m.left > 1 ? 's' : ''}.` : ' The merchant packs up.'}`);
+    say(`Traded ${costText(tr.give)} for ${tr.crate ? 'a food crate: nobody needs food at this upkeep' : tradeGets(tr)}.${m.left ? ` The merchant will make ${m.left} more trade${m.left > 1 ? 's' : ''}.` : ' The merchant packs up.'}`);
     updateHUD();
   }
 
@@ -3337,6 +3343,8 @@
     } else if (a.type === 'trade') {
       const tr = TRADES[a.i];
       refund(tr.give); pay(tr.get);
+      Object.entries(tr.items || {}).forEach(([k, n]) => { items[k] = Math.max(0, items[k] - n); });
+      if (tr.crate) { P().feast = false; P().feastWhy = null; }
       if (P().merchant) P().merchant.left++;
       say(`Trade undone. ${costText(tr.give)} returned.`);
       updateHUD();
@@ -3589,9 +3597,9 @@
       $('bpTitle').textContent = 'River merchant';
       $('bpDesc').textContent = m && m.left ? `Trades gold for supplies. ${m.left} trade${m.left > 1 ? 's' : ''} left. Leaves when your moves end.` : 'The merchant has packed up and left.';
       $('bpList').innerHTML = TRADES.map((tr, i) => {
-        const why = !m || !m.left ? 'No trades left.' : shortfall(tr.give).length ? `Need ${shortfall(tr.give).join(', ')}.` : null;
+        const why = !m || !m.left ? 'No trades left.' : shortfall(tr.give).length ? `Need ${shortfall(tr.give).join(', ')}.` : tradeWhy(tr);
         return `<div class="bp-row"><b>${tr.name}</b>
-          <span class="bp-stats">You get: ${costText(tr.get)}</span>
+          <span class="bp-stats">You get: ${tradeGets(tr)}</span>
           <span class="bp-cost">${chips(tr.give)}</span>
           <button class="${why ? '' : 'primary'}" data-act="trade-${i}" ${why ? 'disabled' : ''}>Trade</button>
           ${why ? `<span class="bp-why">${why}</span>` : ''}</div>`;

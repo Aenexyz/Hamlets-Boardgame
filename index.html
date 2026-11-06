@@ -457,7 +457,7 @@
     orc:    { name: 'Ashen Orcs',         hero: 'grukk',
               perks: 'Every unit has +1 HP. Gather 1 less on everything.',
               heroText: 'Grukk (6 HP, hits 2). Bandits he kills drop double loot.',
-              ability: 'Healing totem', abilityText: 'A healing totem rises next to Grukk for 2 turns. It can\'t move, and heals your units within 2 hexes for 2 HP each turn.' },
+              ability: 'Healing totem', abilityText: 'A healing totem rises next to Grukk for 2 turns. It can\'t move, and heals your units within 2 hexes for 2 HP each turn and ends their hunger.' },
     dwarf:  { name: 'Stoneheart Dwarves', hero: 'durnik',
               perks: 'Quarries and gold veins never roll 0, and gold rolls higher. Every 4th upkeep costs double food.',
               heroText: 'Durnik (4 HP, gathers). Digs twice on quarries and gold veins; emptied veins become quarries.',
@@ -3239,12 +3239,14 @@
   // healing totems: heal friends next to them, then count down and crumble
   function totemHeal(t) {
     const healed = [];
-    mine().filter(u => u !== t && dist(u, t) <= TOTEM_RANGE && u.hp < maxHpU(u)).forEach(u => {
-      const n = Math.min(TOTEM_HEAL, maxHpU(u) - u.hp);
-      u.hp += n; setBar(u.mesh.userData.bar, u.hp);
-      floatAt(u.mesh.position, `+${n} HP`, '#7dff9a', 1.1, 200);
-      healed.push(`${label(u)} +${n}`);
+    mine().filter(u => u !== t && dist(u, t) <= TOTEM_RANGE && (u.hp < maxHpU(u) || u.hungry)).forEach(u => {
+      const n = Math.min(TOTEM_HEAL, maxHpU(u) - u.hp), fed = u.hungry;
+      if (n > 0) { u.hp += n; setBar(u.mesh.userData.bar, u.hp); }
+      u.hungry = false;   // the totem's warmth also ends hunger, so the unit won't starve at the next upkeep
+      floatAt(u.mesh.position, [n > 0 ? `+${n} HP` : '', fed ? 'No longer hungry' : ''].filter(Boolean).join(' · '), '#7dff9a', 1.1, 200);
+      healed.push(`${label(u)}${n > 0 ? ` +${n}` : ''}${fed ? ' (no longer hungry)' : ''}`);
     });
+    refreshMarkers();
     t.life = (t.life || 0) - 1;
     return healed;
   }
@@ -3279,7 +3281,7 @@
       s.mesh.scale.set(1, 0.01, 1);
       tween(500, (k, e) => { s.mesh.scale.set(1, 0.01 + 0.99 * e, 1); });
       const healed = totemHeal(s);
-      say(`Grukk raised a healing totem. ${healed.length ? `It healed ${healed.join(', ')}. ` : ''}It heals your units within ${TOTEM_RANGE} hexes for ${TOTEM_HEAL} HP now and at the start of your next turn.`);
+      say(`Grukk raised a healing totem. ${healed.length ? `It healed ${healed.join(', ')}. ` : ''}It heals your units within ${TOTEM_RANGE} hexes for ${TOTEM_HEAL} HP and ends their hunger, now and at the start of your next turn.`);
     } else if (f === 'wolf') {
       const kind = 'wolf';
       const t = pickOne(freeNear(h));

@@ -936,7 +936,8 @@
   function makeUnit(kind, owner) {
     const g = new THREE.Group();
     const cloth = teamMat(owner, false);
-    const bodyMat = kind === 'footman' ? M.steel : cloth;
+    const orcTroop = (kind === 'footman' || kind === 'archer') && players[owner] && players[owner].faction === 'orc';   // Ashen Orc soldiers get their own look
+    const bodyMat = kind === 'footman' ? (orcTroop ? M.leather : M.steel) : cloth;
     const isHero = !!UNITS[kind].hero;
     if (kind === 'totem') {   // a carved post with stacked orc faces, a skull on top and a green glow at the foot
       const wood = mat(0x5e3f26), carve = mat(0x3b2716);
@@ -959,7 +960,7 @@
     }
     if (kind !== 'wolf' && kind !== 'totem') {
       const body = shadowed(new THREE.Mesh(pawnGeo, bodyMat));
-      const skin = kind === 'grukk' || kind === 'hunch' ? M.orcSkin : kind === 'skeleton' ? M.bone : M.skin;
+      const skin = kind === 'grukk' || kind === 'hunch' || orcTroop ? M.orcSkin : kind === 'skeleton' ? M.bone : M.skin;
       if (kind === 'skeleton') body.material = M.bone;
       const head = shadowed(new THREE.Mesh(new THREE.SphereGeometry(0.085, 14, 10), skin)); head.position.y = 0.43;
       if (kind === 'hunch') { body.scale.set(1.15, 0.8, 1.15); head.position.set(0, 0.33, 0.07); }
@@ -994,6 +995,57 @@
       const blade = shadowed(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.05, 0.02), M.steel)); blade.position.y = 0.15;
       tool.add(shaft, blade); tool.position.set(0.15, 0.26, 0.02); tool.rotation.z = -0.35; tool.visible = false;
       g.add(brim, hat, tool); g.userData.tool = tool;
+    } else if (kind === 'footman' && orcTroop) {
+      // orc brute: bare green head with two white horns and tusks, a spiked club in the right hand
+      const horn = new THREE.ConeGeometry(0.022, 0.13, 8); horn.translate(0, 0.065, 0);
+      [-1, 1].forEach(sd => {
+        const h = shadowed(new THREE.Mesh(horn, M.bone)); h.position.set(sd * 0.07, 0.47, 0.01); h.rotation.set(0.15, 0, -sd * 0.75); g.add(h);
+        const tusk = new THREE.Mesh(new THREE.ConeGeometry(0.011, 0.04, 5), M.bone); tusk.position.set(sd * 0.03, 0.4, 0.08); tusk.rotation.x = 0.3; g.add(tusk);
+      });
+      [-0.032, 0.032].forEach(o => { const brow = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.012, 0.02), mat(0x3f5226)); brow.position.set(o, 0.455, 0.075); brow.rotation.z = o > 0 ? 0.3 : -0.3; g.add(brow); });
+      const tabard = shadowed(new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.105, 0.16, 12), cloth)); tabard.position.y = 0.22;
+      const belt = shadowed(new THREE.Mesh(new THREE.TorusGeometry(0.083, 0.014, 6, 14), M.bone)); belt.rotation.x = Math.PI / 2; belt.position.y = 0.3;
+      [-1, 1].forEach(sd => { const pad = shadowed(new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2), M.leather)); pad.position.set(sd * 0.085, 0.32, 0); pad.rotation.z = -sd * 0.5; g.add(pad); });
+      const club = new THREE.Group();
+      const shaft = shadowed(new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.02, 0.26, 7), M.wood)); shaft.position.y = 0.13;
+      const knob = shadowed(new THREE.Mesh(new THREE.DodecahedronGeometry(0.055, 0), mat(0x5a3d24))); knob.position.y = 0.28; knob.scale.set(1, 1.25, 1);
+      club.add(shaft, knob);
+      for (let i = 0; i < 5; i++) { const a = i / 5 * Math.PI * 2; const sp = new THREE.Mesh(new THREE.ConeGeometry(0.01, 0.04, 4), M.bone); sp.position.set(Math.cos(a) * 0.05, 0.28 + (i % 2) * 0.03, Math.sin(a) * 0.05); sp.rotation.set(Math.sin(a) * 1.4, 0, -Math.cos(a) * 1.4); club.add(sp); }
+      club.position.set(0.14, 0.14, 0.05); club.rotation.z = -0.35;
+      g.add(tabard, belt, club);
+    } else if (kind === 'archer' && orcTroop) {
+      // orc archer: green head with a single white horn on one side, bow with a nocked arrow, quiver on the back
+      const horn = new THREE.ConeGeometry(0.02, 0.12, 8); horn.translate(0, 0.06, 0);
+      const h = shadowed(new THREE.Mesh(horn, M.bone)); h.position.set(0.075, 0.46, 0); h.rotation.set(0.1, 0, -0.95); g.add(h);
+      const stub = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.018, 0.02, 6), M.bone); stub.position.set(-0.075, 0.47, 0); stub.rotation.z = 0.9; g.add(stub);   // the other horn broke off
+      [-1, 1].forEach(sd => { const tusk = new THREE.Mesh(new THREE.ConeGeometry(0.01, 0.035, 5), M.bone); tusk.position.set(sd * 0.03, 0.4, 0.08); tusk.rotation.x = 0.3; g.add(tusk); });
+      const band = shadowed(new THREE.Mesh(new THREE.CylinderGeometry(0.105, 0.105, 0.04, 12), M.leather)); band.position.y = 0.2;
+      const scarf = shadowed(new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.1, 0.05, 12), cloth)); scarf.position.y = 0.33;
+      const strap = new THREE.Group(), ring = shadowed(new THREE.Mesh(new THREE.TorusGeometry(0.088, 0.01, 5, 18), M.leather));
+      ring.rotation.x = Math.PI / 2; strap.add(ring); strap.position.set(0, 0.3, 0); strap.rotation.z = 0.75;   // bandolier over one shoulder
+      // quiver across the back, with fletched arrows poking out
+      const quiver = new THREE.Group();
+      const tube = shadowed(new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.034, 0.24, 10), mat(0x6b4426))); quiver.add(tube);
+      const lip = new THREE.Mesh(new THREE.TorusGeometry(0.04, 0.007, 5, 12), M.bone); lip.rotation.x = Math.PI / 2; lip.position.y = 0.12; quiver.add(lip);
+      [[-0.015, 0.01], [0.015, -0.01], [0, 0.018]].forEach(([x, z], i) => {
+        const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.08, 4), M.wood); shaft.position.set(x, 0.15, z);
+        const fl = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.035, 0.004), i === 1 ? cloth : M.bone); fl.position.set(x, 0.18, z);
+        quiver.add(shaft, fl);
+      });
+      quiver.position.set(0.04, 0.3, -0.11); quiver.rotation.set(0.25, 0, -0.3);
+      // bow held out in the left hand, string drawn with an arrow on it
+      const bowG = new THREE.Group();
+      const bowArc = shadowed(new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.013, 6, 16, Math.PI), M.wood)); bowArc.rotation.z = -Math.PI / 2;
+      const string = new THREE.Group(), half = Math.hypot(0.06, 0.16), lean = Math.atan2(0.06, 0.16);
+      [-1, 1].forEach(sd => { const seg = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.003, half, 4), M.bone); seg.position.set(-0.03, sd * 0.08, 0); seg.rotation.z = -sd * lean; string.add(seg); });
+      const arrow = new THREE.Group();
+      const ashaft = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.26, 4), M.wood); ashaft.rotation.z = Math.PI / 2; ashaft.position.x = 0.07;
+      const tip = new THREE.Mesh(new THREE.ConeGeometry(0.012, 0.035, 5), M.steel); tip.rotation.z = -Math.PI / 2; tip.position.x = 0.215;
+      const fletch = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.022, 0.004), cloth); fletch.position.x = -0.045;
+      arrow.add(ashaft, tip, fletch); arrow.position.x = -0.05;
+      bowG.add(bowArc, string, arrow);
+      bowG.position.set(-0.13, 0.3, 0.08); bowG.rotation.y = -Math.PI / 2 + 0.25;   // aims forward
+      g.add(band, scarf, strap, quiver, bowG);
     } else if (kind === 'footman') {
       const helm = shadowed(new THREE.Mesh(new THREE.SphereGeometry(0.095, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), M.dark)); helm.position.y = 0.45;
       const tabard = shadowed(new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.105, 0.16, 12), cloth)); tabard.position.y = 0.22;

@@ -383,7 +383,7 @@
              { p: 0.03,  text: 'found a bandit stash', stash: true },
              { p: 0.05,  text: 'found lost gold coins in the river', gainRange: { gold: [1, 3] } },
              { p: 0.05,  text: 'met a river merchant', merchant: true },
-             { p: 0.04,  text: 'caught a food crate floating down the river', crate: true },
+             { p: 0.04,  text: 'caught a food crate floating down the river', item: 'crate' },
              { p: 0.04,  text: 'found an old fishing pole', item: 'pole' },
              { p: 0.04,  text: 'found worn-out boots', item: 'boots' },
              { p: 0.015, text: 'found a silver axe by the river', item: 'silveraxe', once: 'silveraxe' }],
@@ -397,10 +397,9 @@
     { name: 'Bundle of logs', give: { gold: 1 }, get: { wood: 3 } },
     { name: 'Cut stone',      give: { gold: 2 }, get: { stone: 3 } },
     { name: 'Supply crate',   give: { gold: 2 }, get: { food: 3, wood: 2, stone: 1 } },
-    { name: 'Food crate',     give: { gold: 10 }, get: {}, crate: true },   // nobody eats at this turn's upkeep
+    { name: 'Food crate',     give: { gold: 10 }, get: {}, items: { crate: 1 } },
   ];
-  const tradeGets = tr => [costText(tr.get), ...Object.entries(tr.items || {}).map(([k, n]) => `${n} ${ITEMS[k].name.toLowerCase()}`), tr.crate ? 'skip this upkeep' : ''].filter(Boolean).join(', ');
-  const tradeWhy = tr => tr.crate && P().feast ? 'Upkeep is already covered this turn.' : null;
+  const tradeGets = tr => [costText(tr.get), ...Object.entries(tr.items || {}).map(([k, n]) => `${n} ${ITEMS[k].name.toLowerCase()}`)].filter(Boolean).join(', ');
   // Single-use tools: the carrier gathers twice the next time it works a matching tile.
   const ITEMS = {
     axe:       { name: 'Worn-out axe',    short: 'axe',          tiles: ['forest'],         where: 'a forest',              desc: 'Single use: gather twice on a forest.' },
@@ -415,6 +414,7 @@
     lightning: { name: 'Lightning scroll', short: 'lightning scroll', special: 'lightning', use: 'Lightning', desc: 'Strike any rival unit or bandit anywhere on the map for 3 damage. One use.' },
     skeleton:  { name: 'Skeleton scroll', short: 'skeleton scroll', special: 'skeleton', use: 'Raise skeleton', desc: 'Raise a skeleton (1 HP, hits 1, moves 3, never eats) next to your base. It can explode to hit every adjacent enemy for 1. One use.' },
     harvest:   { name: 'Harvest scroll',  short: 'harvest scroll', special: 'harvest', use: 'Harvest scroll', desc: 'All your gatherers gather again, right now. One use.' },
+    crate:     { name: 'Food crate',      short: 'food crate',   special: 'crate',  use: 'Open crate', desc: 'Open it during your moves: nobody needs food at this turn\'s upkeep. One use.' },
     timescroll:{ name: 'Time scroll',     short: 'time scroll',  special: 'time',   use: 'Time scroll', desc: 'After this turn\'s combat, take another move phase and another combat phase. One use.' },
     shield:    { name: 'Shield scroll',   short: 'shield scroll', special: 'shield', use: 'Shield',      desc: 'The selected unit gets a shield that blocks the next hit. One use.' },
     power:     { name: 'Power-up scroll', short: 'power-up scroll', special: 'power', use: 'Power up',   desc: 'The selected unit\'s next attack deals +3 damage. One use.' },
@@ -1672,11 +1672,6 @@
           floatAt(u.mesh.position, `+${k} Wheat seed${k > 1 ? 's' : ''}`, '#c8e38a', 1.15, 450);
           entry.notes.push({ cls: 'ev', text: `Found ${k} wheat seed${k > 1 ? 's' : ''}. ${P().farm ? 'Plant them at your farm.' : 'Build a farm to plant them.'}` });
         }
-        if (ev.crate) {
-          P().feast = true; P().feastWhy = 'crate';
-          floatAt(u.mesh.position, 'Food crate!', RES_COLOR.food, 1.15, 450);
-          entry.notes.push({ cls: 'ev', text: 'Caught a food crate floating down the river. Nobody needs food at this upkeep.' });
-        }
         if (ev.merchant) {
           P().merchant = { left: MERCHANT_TRADES, tile: t };
           floatAt(u.mesh.position, 'A river merchant!', '#f3e6c4', 1.15, 450);
@@ -2288,6 +2283,7 @@
     if (k === 'skeleton') return !!spawnTile('base') && mine().length < MAX_UNITS;
     if (k === 'harvest') return mine().some(u => UNITS[u.kind].gathers);
     if (k === 'timescroll') return !P().timeScroll;
+    if (k === 'crate') return !P().feast;
     if (!selected) return false;
     if (k === 'scope') return selected.kind === 'archer' && !selected.scope;
     if (k === 'armor') return !selected.armor;
@@ -2337,6 +2333,14 @@
       reportResume = true;
       updateHUD();
       return later(() => showReport(report, got), 750);
+    }
+    if (k === 'crate') {
+      items[k]--;
+      undoStack.push({ type: 'item', item: k });
+      P().feast = true; P().feastWhy = 'crate';
+      floatAt(posOf(BASE.x, BASE.z), 'Food crate opened', RES_COLOR.food, 1.3);
+      say('You opened a food crate. Nobody needs food at this upkeep.');
+      return updateHUD();
     }
     if (k === 'timescroll') {
       items[k]--; undoStack = [];
@@ -2884,6 +2888,8 @@
 
   function aiEconomy() {
     const need = eatersNext();
+    // open a food crate when the next upkeep would leave someone hungry
+    if (items.crate > 0 && stock.food < need && canUse('crate')) useItem('crate');
     // plant any seeds
     if (P().farm && items.seed > 0) { const n = Math.min(items.seed, FARM_SLOTS - P().farm.crops.length); if (n > 0) plant(n); }
     // grow to Town as soon as it's safe on food
@@ -3250,6 +3256,7 @@
     if (placing) return 'Finish placing first.';
     if (NEEDS_UNIT.includes(k) && !selected) return 'Select a unit first.';
     if (canUse(k)) return null;
+    if (k === 'crate' && P().feast) return 'Upkeep is already covered this turn.';
     const u = selected;
     if (u) {
       const has = { sword: u.sword || u.wornSword, wornsword: u.sword || u.wornSword, armor: u.armor, scope: u.scope, shield: u.bubble, power: u.power, silveraxe: u.silver || u.tools.has('axe'), axe: u.tools.has('axe') || u.silver, boots: u.extraMoves, horse: u.horse, drug: u.drug }[k] || (u.tools && u.tools.has(k));
@@ -3288,13 +3295,12 @@
   }
   function trade(i) {
     const m = P().merchant, tr = TRADES[i];
-    if (!m || m.left <= 0 || !affordable(tr.give) || tradeWhy(tr)) return;
+    if (!m || m.left <= 0 || !affordable(tr.give)) return;
     pay(tr.give); refund(tr.get);
     Object.entries(tr.items || {}).forEach(([k, n]) => { items[k] += n; });
-    if (tr.crate) { P().feast = true; P().feastWhy = 'crate'; }
     m.left--;
     undoStack.push({ type: 'trade', i });
-    say(`Traded ${costText(tr.give)} for ${tr.crate ? 'a food crate: nobody needs food at this upkeep' : tradeGets(tr)}.${m.left ? ` The merchant will make ${m.left} more trade${m.left > 1 ? 's' : ''}.` : ' The merchant packs up.'}`);
+    say(`Traded ${costText(tr.give)} for ${tradeGets(tr)}.${m.left ? ` The merchant will make ${m.left} more trade${m.left > 1 ? 's' : ''}.` : ' The merchant packs up.'}`);
     updateHUD();
   }
 
@@ -3322,6 +3328,7 @@
       select(selected && !selected.done ? selected : mine().find(q => !q.done) || null, false);
     } else if (a.type === 'item') {
       items[a.item]++;
+      if (a.item === 'crate') { P().feast = false; P().feastWhy = null; say('Food crate packed back up.'); refreshMarkers(); updateHUD(); return; }
       if (a.item === 'boots') { u.extraMoves = 0; if (selected === u) moves = reachable(u); }
       else if (a.item === 'silveraxe') u.silver = false;
       else if (a.item === 'sword') { u.sword = false; if (selected === u) targets = atkOf(u) > 0 ? inRange(u) : []; }
@@ -3344,7 +3351,6 @@
       const tr = TRADES[a.i];
       refund(tr.give); pay(tr.get);
       Object.entries(tr.items || {}).forEach(([k, n]) => { items[k] = Math.max(0, items[k] - n); });
-      if (tr.crate) { P().feast = false; P().feastWhy = null; }
       if (P().merchant) P().merchant.left++;
       say(`Trade undone. ${costText(tr.give)} returned.`);
       updateHUD();
@@ -3597,7 +3603,7 @@
       $('bpTitle').textContent = 'River merchant';
       $('bpDesc').textContent = m && m.left ? `Trades gold for supplies. ${m.left} trade${m.left > 1 ? 's' : ''} left. Leaves when your moves end.` : 'The merchant has packed up and left.';
       $('bpList').innerHTML = TRADES.map((tr, i) => {
-        const why = !m || !m.left ? 'No trades left.' : shortfall(tr.give).length ? `Need ${shortfall(tr.give).join(', ')}.` : tradeWhy(tr);
+        const why = !m || !m.left ? 'No trades left.' : shortfall(tr.give).length ? `Need ${shortfall(tr.give).join(', ')}.` : null;
         return `<div class="bp-row"><b>${tr.name}</b>
           <span class="bp-stats">You get: ${tradeGets(tr)}</span>
           <span class="bp-cost">${chips(tr.give)}</span>

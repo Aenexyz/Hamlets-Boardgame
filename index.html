@@ -138,6 +138,13 @@
   .rules summary { cursor: pointer; font-weight: 700; color: var(--gold); }
   .rules[open] summary { margin-bottom: 10px; }
   .rules > * + * { margin-top: 10px; }
+  .online { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 12px; }
+  .online-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .online-row input { font: inherit; color: var(--parch); background: var(--panel); border: 1px solid var(--line); border-radius: 9px; padding: 9px 12px; flex: 1 1 140px; min-width: 0; text-transform: none; }
+  #olCode { text-transform: uppercase; letter-spacing: 0.1em; }
+  .online-row input:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
+  .lb-code { font-family: var(--body); font-weight: 700; letter-spacing: 0.12em; color: var(--parch); }
+  .lb-tag { font-size: 12px; color: var(--muted); }
   .facs { display: flex; flex-direction: column; gap: 8px; }
   .fac-row { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 4px 10px; align-items: center; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
   .fac-row b { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; }
@@ -236,6 +243,18 @@
       </div>
       <div class="facs" id="facs"></div>
       <button class="primary" id="start" style="align-self:flex-start">Start</button>
+      <div class="online">
+        <div class="bp-sec">Play online with friends</div>
+        <div class="online-row">
+          <input id="olName" maxlength="14" placeholder="Your name" aria-label="Your name" autocomplete="nickname">
+          <button id="olCreate" class="primary">Create room</button>
+        </div>
+        <div class="online-row">
+          <input id="olCode" maxlength="9" placeholder="Room code" aria-label="Room code" autocapitalize="characters">
+          <button id="olJoin">Join room</button>
+        </div>
+        <span class="pick-note" id="olMsg">Each friend plays on their own device. Uses the player count above.</span>
+      </div>
       <details class="rules"><summary>How to play</summary>
       <p><b>Grow your base</b> from Hamlet (10 HP) to Town (15 HP), City (20 HP) and finally Empire. Founding an empire wins; so does being the last base standing. Hamlets can build a farm for wheat seeds; towns unlock the barracks; cities unlock the blacksmith and the wizard tower. Units can attack bandits, rival units and rival bases.</p>
       <p>Each player leads a <b>faction</b> with its own perks and a <b>hero</b> whose ability recharges every 4 turns. Fallen heroes return to the base after 3 turns for 2 gold.</p>
@@ -257,6 +276,18 @@
       <p>Bandits have 3 HP and drop gold or tools when killed. Build a barracks to train footmen (3 HP, hit for 2) and archers (shoot 3 tiles away).</p>
       </details>
       <p style="color:var(--muted);font-size:13.5px">Drag to rotate. Right-drag, two fingers or WASD to pan. Scroll or pinch to zoom.</p>
+    </div>
+  </div>
+  <div class="overlay" id="lobby" hidden>
+    <div class="panel card">
+      <h2>Room <span id="lbCode" class="lb-code"></span></h2>
+      <p class="pick-note" id="lbInfo">Share this code with your friends. They choose Join room and type it in.</p>
+      <div class="facs" id="lbSeats"></div>
+      <span class="pick-note" id="lbMsg"></span>
+      <div class="online-row">
+        <button class="primary" id="lbStart">Start game</button>
+        <button id="lbLeave">Leave room</button>
+      </div>
     </div>
   </div>
   <div class="overlay" id="handoff" hidden>
@@ -284,6 +315,9 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-app-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-auth-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-database-compat.js"></script>
 <script>
 (() => {
   // ---------- Config ----------
@@ -1233,13 +1267,15 @@
 
   let factionPicks = ['hearth', 'wolf', 'mer', 'orc'];
   let seatPicks = ['human', 'ai', 'ai', 'ai'];
-  function newGame(count = playerCount, facs = factionPicks, seats = seatPicks) {
+  function newGame(count = playerCount, facs = factionPicks, seats = seatPicks, onlineSeats = null) {
     playerCount = count;
+    online.mapId = Math.random().toString(36).slice(2, 10);
     players = PLAYER_DEFS.slice(0, count).map((d, i) => ({
       idx: i, name: d.name, color: d.color, dark: d.dark, css: d.css, base: { ...d.base },
       stock: { ...START_STOCK }, items: Object.fromEntries(Object.keys(ITEMS).map(k => [k, 0])), found: {}, merchant: null,
       stage: 0, baseHp: STAGES[0].hp, farm: null, smith: null, baseBar: null,
-      ai: i > 0 && seats[i] === 'ai', faction: facs[i] || FACTION_ORDER[i], cd: 0, feast: false, upkeeps: 0, heroDown: null, barracks: null, alive: true,
+      ai: (i > 0 || onlineSeats) && seats[i] === 'ai', uid: onlineSeats && onlineSeats[i] ? onlineSeats[i].uid || null : null, nick: onlineSeats && onlineSeats[i] ? onlineSeats[i].name || null : null,
+      faction: facs[i] || FACTION_ORDER[i], cd: 0, feast: false, upkeeps: 0, heroDown: null, barracks: null, alive: true,
     }));
     Object.keys(teamMats).forEach(k => delete teamMats[k]);
     timers.forEach(clearTimeout); timers = []; tweens.length = 0;
@@ -1296,11 +1332,18 @@
   }
 
   function beginPlayerTurn() {
+    if (online.on && !isLocalTurn()) {   // another device takes over: hand the turn to it and watch
+      phase = 'begin'; busy = true; selected = null; moves = new Map(); targets = [];
+      refreshMarkers(); updateHUD();
+      pushState(true);
+      return;
+    }
+    if (online.on) online.began = `${turn}:${cp}`;
     phase = 'gather'; selected = null; moves = new Map(); targets = [];
     focusBase(false);
     refreshMarkers(); updateHUD();
     const humans = players.filter(pl => !pl.ai && pl.alive).length;
-    if (players.length > 1 && !P().ai && humans > 1) {
+    if (players.length > 1 && !P().ai && humans > 1 && !online.on) {
       busy = true;
       $('hoTitle').textContent = `${P().name}'s turn`;
       $('hoTitle').style.color = P().css;
@@ -2318,6 +2361,358 @@
     updateHUD();
   }
 
+  // ---------- Online play (Firebase) ----------
+  // Each player's own device runs their turn; the host also runs AI seats. After every change the device in
+  // control writes the whole game state to the room, and every other device redraws from it.
+  const FIREBASE_CONFIG = {
+    apiKey: 'AIzaSyB0Q91Lrqfjjf8H4FuubaN789S4iVAVYjw',
+    authDomain: 'rise-of-the-hamlets.firebaseapp.com',
+    databaseURL: 'https://rise-of-the-hamlets-default-rtdb.asia-southeast1.firebasedatabase.app',
+    projectId: 'rise-of-the-hamlets',
+    storageBucket: 'rise-of-the-hamlets.firebasestorage.app',
+    messagingSenderId: '311204905694',
+    appId: '1:311204905694:web:eb612276ecc435cd40784f',
+  };
+  const online = { on: false, code: null, uid: null, host: false, seat: 0, room: null, ref: null, lastPushed: '', rev: 0, began: '', mapId: '' };
+  let fb = null;
+  const isLocalTurn = () => {
+    if (!online.on) return true;
+    const pl = players[cp];
+    if (!pl) return false;
+    return pl.ai ? online.host : pl.uid === online.uid;
+  };
+  const viewerSeat = () => online.on ? online.seat : cp;
+  async function fbReady() {
+    if (fb) return fb;
+    if (!window.firebase) throw new Error('Online play could not load. Check your connection; it works on the GitHub Pages version.');
+    if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+    const auth = firebase.auth();
+    // each browser tab is its own player, so friends (or testers) can share a browser
+    const signIn = auth.currentUser ? Promise.resolve() : auth.setPersistence(firebase.auth.Auth.Persistence.SESSION).then(() => auth.signInAnonymously());
+    await Promise.race([signIn, new Promise((_, rej) => setTimeout(() => rej(new Error('Could not reach the online service. Online play works on the GitHub Pages version of the game.')), 9000))]);
+    online.uid = auth.currentUser.uid;
+    fb = firebase.database();
+    return fb;
+  }
+  const olMsg = t => { $('olMsg').textContent = t; };
+  const randCode = () => { const A = 'ABCDEFGHJKMNPQRSTUVWXYZ', D = '23456789'; let c = ''; for (let i = 0; i < 4; i++) c += A[Math.floor(Math.random() * A.length)]; c += '-'; for (let i = 0; i < 2; i++) c += D[Math.floor(Math.random() * D.length)]; return c; };
+  const myName = () => ($('olName').value.trim() || 'Player').slice(0, 14);
+
+  async function createRoom() {
+    try {
+      olMsg('Connecting…');
+      const db = await fbReady();
+      const code = randCode();
+      const seats = {};
+      const count = Math.max(2, chosen);   // an online room needs at least two seats
+      for (let i = 0; i < count; i++) seats[i] = i === 0 ? { type: 'human', uid: online.uid, name: myName(), faction: factionPicks[0] } : { type: 'open', faction: factionPicks[i] };   // seats start open for friends; the host can switch them to AI
+      await db.ref('rooms/' + code).set({ host: online.uid, status: 'lobby', count, seats, created: Date.now() });
+      online.host = true; online.seat = 0;
+      enterRoom(code);
+    } catch (e) { olMsg(e.message || String(e)); }
+  }
+  async function joinRoom() {
+    const code = $('olCode').value.trim().toUpperCase();
+    if (!code) return olMsg('Type the room code your friend gave you.');
+    try {
+      olMsg('Connecting…');
+      const db = await fbReady();
+      const ref = db.ref('rooms/' + code);
+      const snap = await ref.get();
+      if (!snap.exists()) return olMsg(`No room called ${code}. Check the code.`);
+      const room = snap.val();
+      const seats = room.seats || {};
+      const mine2 = Object.keys(seats).find(k => seats[k].uid === online.uid);
+      if (room.status !== 'lobby' && mine2 == null) return olMsg('That game has already started.');
+      let seat = mine2 != null ? +mine2 : null;
+      if (seat == null) {
+        const res = await ref.child('seats').transaction(cur => {
+          if (!cur) return cur;
+          const k = Object.keys(cur).find(i => cur[i].type === 'open');
+          if (k == null) return;   // abort: room full
+          const taken = Object.values(cur).filter(v => v.type !== 'open' && v.faction).map(v => v.faction);
+          const fac0 = cur[k].faction && !taken.includes(cur[k].faction) ? cur[k].faction : FACTION_ORDER.find(f => !taken.includes(f));
+          cur[k] = { type: 'human', uid: online.uid, name: myName(), faction: fac0 };
+          return cur;
+        });
+        if (!res.committed) return olMsg('That room is full.');
+        const after = res.snapshot.val();
+        seat = +Object.keys(after).find(k => after[k].uid === online.uid);
+      }
+      online.host = room.host === online.uid; online.seat = seat;
+      enterRoom(code);
+    } catch (e) { olMsg(e.message || String(e)); }
+  }
+  function enterRoom(code) {
+    online.on = true; online.code = code; online.ref = fb.ref('rooms/' + code);
+    online.lastPushed = ''; online.began = ''; online.mapId = '';
+    $('intro').hidden = true; $('lobby').hidden = false; $('lbCode').textContent = code;
+    online.ref.on('value', snap => {
+      const room = snap.val();
+      if (!room) { leaveRoom('The room was closed.'); return; }
+      online.room = room;
+      if (room.status === 'lobby') renderLobby(room);
+      else if (room.state) {
+        $('lobby').hidden = true;
+        let st; try { st = JSON.parse(room.state); } catch (e) { return; }
+        if (st.by === online.uid && online.mapId === st.mapId) return;   // our own update
+        applySnapshot(st);
+      }
+    });
+  }
+  function leaveRoom(msg) {
+    if (online.ref) online.ref.off();
+    Object.assign(online, { on: false, code: null, room: null, ref: null, host: false, seat: 0 });
+    $('lobby').hidden = true; $('intro').hidden = false;
+    olMsg(msg || 'You left the room.');
+  }
+  function renderLobby(room) {
+    const seats = room.seats || {};
+    const isHost = room.host === online.uid;
+    online.host = isHost;
+    const taken = k => Object.keys(seats).filter(i => i !== String(k) && seats[i].type !== 'open').map(i => seats[i].faction);
+    $('lbSeats').innerHTML = Object.keys(seats).sort().map(k => {
+      const st = seats[k], d = PLAYER_DEFS[k], me = st.uid === online.uid;
+      const who = st.type === 'ai' ? 'AI' : st.type === 'open' ? 'Waiting for a player…' : `${st.name}${me ? ' (you)' : ''}${room.host === st.uid ? ' · host' : ''}`;
+      const facSel = (me || (isHost && st.type === 'ai')) ? `<select data-fac="${k}">${FACTION_ORDER.map(f => `<option value="${f}" ${f === st.faction ? 'selected' : ''} ${taken(k).includes(f) ? 'disabled' : ''}>${FACTIONS[f].name}</option>`).join('')}</select>` : `<span class="lb-tag">${st.faction ? FACTIONS[st.faction].name : ''}</span>`;
+      const typeSel = isHost && k !== '0' && st.type !== 'human' ? `<select data-type="${k}"><option value="open" ${st.type === 'open' ? 'selected' : ''}>Open seat</option><option value="ai" ${st.type === 'ai' ? 'selected' : ''}>AI</option></select>` : '';
+      return `<div class="fac-row"><b style="color:${d.css}">${d.name}</b><span class="fac-ctl">${facSel}${typeSel}</span><p>${who}</p></div>`;
+    }).join('');
+    $('lbSeats').querySelectorAll('select[data-fac]').forEach(el => el.addEventListener('change', e => online.ref.child(`seats/${el.dataset.fac}/faction`).set(e.target.value)));
+    $('lbSeats').querySelectorAll('select[data-type]').forEach(el => el.addEventListener('change', e => online.ref.child(`seats/${el.dataset.type}/type`).set(e.target.value)));
+    const open = Object.values(seats).filter(v => v.type === 'open').length;
+    $('lbStart').hidden = !isHost;
+    $('lbStart').disabled = open > 0;
+    $('lbMsg').textContent = isHost ? (open ? `${open} seat${open > 1 ? 's are' : ' is'} still open. Wait for friends or set the seat to AI.` : 'Everyone is in. Start when ready.') : 'Waiting for the host to start the game.';
+  }
+  async function startOnline() {
+    const room = online.room; if (!room || room.host !== online.uid) return;
+    const seats = room.seats || {}, n = room.count;
+    const facs = [], types = [];
+    for (let i = 0; i < n; i++) { facs.push(seats[i].faction || FACTION_ORDER[i]); types.push(seats[i].type === 'ai' ? 'ai' : 'human'); }
+    newGame(n, facs, types, seats);
+    online.lastPushed = '';
+    pushState(true);
+    await online.ref.child('status').set('playing');
+  }
+
+  // ----- serialize the whole game -----
+  const xy = t => t ? [t.x, t.z] : null;
+  function snapshot() {
+    return {
+      v: 1, mapId: online.mapId, by: online.uid, turn, cp, phase, nextId,
+      log: $('log').textContent,
+      over: phase === 'over' ? { title: $('overTitle').textContent, text: $('overText').textContent } : null,
+      players: players.map(pl => ({
+        idx: pl.idx, faction: pl.faction, ai: pl.ai, uid: pl.uid || null, nick: pl.nick || null,
+        stock: pl.stock, items: pl.items, found: pl.found, merchant: pl.merchant ? { left: pl.merchant.left, t: xy(pl.merchant.tile) } : null,
+        stage: pl.stage, baseHp: pl.baseHp, farm: xy(pl.farm), smith: xy(pl.smith), wizard: xy(pl.wizard), barracks: xy(pl.barracks),
+        alive: pl.alive, cd: pl.cd, feast: pl.feast, upkeeps: pl.upkeeps, heroDown: pl.heroDown, timeScroll: !!pl.timeScroll, lastUpkeep: pl.lastUpkeep || null,
+      })),
+      tiles: tiles.map(t => [t.type, t.amount, t.max, t.owner == null ? -1 : t.owner, t.crops ? t.crops.map(c => c.planted) : null]),
+      units: units.map(u => ({ id: u.id, owner: u.owner, kind: u.kind, num: u.num, x: u.x, z: u.z, hp: u.hp, moved: u.moved, done: u.done, hungry: u.hungry,
+        tools: [...u.tools], silver: !!u.silver, sword: !!u.sword, wornSword: u.wornSword || 0, armor: !!u.armor, scope: !!u.scope, horse: !!u.horse,
+        bubble: !!u.bubble, power: u.power || 0, drug: !!u.drug, fought: !!u.fought, extraMoves: u.extraMoves || 0, rot: u.mesh.rotation.y })),
+      bandits: bandits.map(b => ({ id: b.id, x: b.x, z: b.z, hp: b.hp, guard: b.guard, target: b.target })),
+      lair: lair ? { hp: lair.hp, alive: lair.alive } : null,
+      walls: [...walls.values()].map(w => ({ a: xy(w.a), b: xy(w.b), hp: w.hp })),
+      mines: [...mines.entries()].map(([k, m]) => [k, m.owner]),
+    };
+  }
+  let pushTimer = null;
+  function schedulePush() {
+    if (!online.on || !online.ref || online.applying) return;
+    clearTimeout(pushTimer);
+    pushTimer = setTimeout(() => pushState(false), 220);
+  }
+  function pushState(force) {
+    if (!online.on || !online.ref) return;
+    if (!force && (!isLocalTurn() || online.applying)) return;
+    if (!force && busy && phase === 'move') { schedulePush(); return; }   // wait for moves to finish
+    const s = snapshot();
+    const json = JSON.stringify(s);
+    if (json === online.lastPushed) return;
+    online.lastPushed = json;
+    online.ref.child('state').set(json);
+  }
+
+  // ----- rebuild or update the board from a snapshot -----
+  function unitFromData(d) {
+    const u = { id: d.id, owner: d.owner, kind: d.kind, num: d.num, x: d.x, z: d.z, hp: d.hp, moved: d.moved, done: d.done, hungry: d.hungry,
+      tools: new Set(d.tools || []), silver: d.silver, sword: d.sword, wornSword: d.wornSword, armor: d.armor, scope: d.scope, horse: d.horse,
+      bubble: d.bubble, power: d.power, drug: d.drug, fought: d.fought, extraMoves: d.extraMoves };
+    u.mesh = makeUnit(d.kind, d.owner);
+    u.mesh.traverse(o => { o.userData.unitId = u.id; });
+    u.mesh.position.copy(posOf(d.x, d.z)); u.mesh.rotation.y = d.rot || 0;
+    if (u.horse) addHorse(u);
+    u.mesh.userData.bar.userData.max = maxHpU(u); u.mesh.userData.bar.userData.shown = u.hp / maxHpU(u);
+    u.mesh.userData.bar.userData.fill.scale.x = Math.max(0.0001, BAR_W * u.hp / maxHpU(u));
+    world.add(u.mesh); units.push(u);
+    return u;
+  }
+  function banditFromData(d) {
+    const b = addBandit(d.x, d.z, d.guard, d.target);
+    b.id = d.id; b.hp = d.hp; b.mesh.traverse(o => { o.userData.banditId = b.id; });
+    b.mesh.scale.set(1, 1, 1);
+    const bar = b.mesh.userData.bar; bar.userData.shown = b.hp / BANDIT.hp; bar.userData.fill.scale.x = Math.max(0.0001, BAR_W * b.hp / BANDIT.hp);
+    return b;
+  }
+  function mineMesh(key, owner) {
+    const [x, z] = key.split(',').map(Number);
+    const mesh = new THREE.Group();
+    const disc = new THREE.Mesh(mineGeo, M.dark); disc.position.y = 0.02;
+    const pin = new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 6), new THREE.MeshStandardMaterial({ color: 0xff4a3a, emissive: 0x801a10 })); pin.position.y = 0.05;
+    mesh.add(disc, pin); mesh.position.copy(posOf(x, z));
+    world.add(mesh); mines.set(key, { owner, mesh });
+  }
+  function applyPlayers(s) {
+    s.players.forEach((d, i) => {
+      const pl = players[i];
+      Object.assign(pl, { faction: d.faction, ai: d.ai, uid: d.uid, nick: d.nick, found: d.found || {}, alive: d.alive, cd: d.cd, feast: d.feast, upkeeps: d.upkeeps, heroDown: d.heroDown || null, timeScroll: d.timeScroll, lastUpkeep: d.lastUpkeep || null });
+      Object.keys(pl.stock).forEach(k => delete pl.stock[k]); Object.assign(pl.stock, d.stock);
+      Object.keys(pl.items).forEach(k => { pl.items[k] = (d.items && d.items[k]) || 0; });
+      ['farm', 'smith', 'wizard', 'barracks'].forEach(k => { pl[k] = d[k] ? tileAt(d[k][0], d[k][1]) : null; });
+      pl.merchant = d.merchant ? { left: d.merchant.left, tile: tileAt(d.merchant.t[0], d.merchant.t[1]) } : null;
+      const stageChanged = pl.stage !== d.stage;
+      pl.stage = d.stage; pl.baseHp = d.baseHp;
+      if (pl.baseBar) {
+        pl.baseBar.userData.max = STAGES[pl.stage].hp; setBar(pl.baseBar, pl.baseHp);
+        if (!pl.alive && pl.baseBar.parent) world.remove(pl.baseBar);
+      }
+      if (stageChanged && pl.alive) setTileType(tileAt(pl.base.x, pl.base.z), 'base');
+    });
+  }
+  function buildFromSnapshot(s) {
+    online.applying = true;
+    const n = s.players.length;
+    playerCount = n;
+    players = s.players.map((d, i) => {
+      const def = PLAYER_DEFS[i];
+      return { idx: i, name: def.name, color: def.color, dark: def.dark, css: def.css, base: { ...def.base },
+        stock: { ...d.stock }, items: Object.fromEntries(Object.keys(ITEMS).map(k => [k, 0])), found: {}, merchant: null,
+        stage: d.stage, baseHp: d.baseHp, farm: null, smith: null, wizard: null, barracks: null, baseBar: null, alive: d.alive };
+    });
+    Object.keys(teamMats).forEach(k => delete teamMats[k]);
+    timers.forEach(clearTimeout); timers = []; tweens.length = 0;
+    while (world.children.length) { const c = world.children[0]; world.remove(c); if (c.geometry && c.geometry !== tileGeo && c.geometry !== waterGeo) c.geometry.dispose(); }
+    movingUnit = null; closePopup(); aiToken++; aiRunning = false;
+    tiles = []; units = []; bandits = []; selected = null; busy = false; placing = false; lair = null; walls = new Map(); ghosts = []; mines = new Map(); reportResume = false;
+    undoStack = []; moves = new Map(); targets = []; buildSpots = new Set();
+    s.tiles.forEach((d, i) => {
+      const x = i % N, z = Math.floor(i / N), ty = d[0];
+      const wet = ty === 'water' || ty === 'bridge';
+      const material = ty === 'water' ? waterMat : new THREE.MeshStandardMaterial({ color: ty === 'bridge' ? 0x2f6f9a : 0xffffff, roughness: ty === 'bridge' ? 0.25 : 0.9 });
+      const mesh = new THREE.Mesh(wet ? waterGeo : tileGeo, material);
+      mesh.receiveShadow = true; mesh.position.set(wx(x, z), wet ? -0.05 : 0, wz(z));
+      const t = { x, z, mesh, amount: d[1], props: null, owner: d[3] === -1 ? null : d[3], crops: d[4] ? d[4].map(p => ({ planted: p })) : (ty === 'farm' ? [] : null) };
+      mesh.userData.tile = t; world.add(mesh); tiles.push(t);
+      setTileType(t, ty); t.max = d[2];
+      if (t.props && t.max && YIELD[ty]) { const sc = 0.5 + 0.5 * (t.amount / t.max); t.props.scale.set(sc, sc, sc); }
+    });
+    const lt = tileAt(LAIR.x, LAIR.z);
+    if (s.lair) {
+      const lairBar = makeBar(LAIR_HP, true);
+      lairBar.position.copy(posOf(LAIR.x, LAIR.z)); lairBar.position.y += 0.95; lairBar.scale.set(2, 1.4, 1.4);
+      lair = { isLair: true, x: LAIR.x, z: LAIR.z, hp: s.lair.hp, alive: s.lair.alive, tile: lt, bar: lairBar, mesh: lt.props || lt.mesh };
+      if (lair.alive) { world.add(lairBar); lairBar.userData.shown = lair.hp / LAIR_HP; lairBar.userData.fill.scale.x = Math.max(0.0001, BAR_W * lair.hp / LAIR_HP); }
+    }
+    players.forEach((pl, i) => {
+      const bar = makeBar(STAGES[pl.stage].hp, false); bar.position.copy(posOf(pl.base.x, pl.base.z)); bar.position.y += 1.05; bar.scale.set(1.8, 1.4, 1.4);
+      if (pl.alive) world.add(bar);
+      pl.baseBar = bar;
+      pl.baseObj = { isBase: true, owner: i, x: pl.base.x, z: pl.base.z, get mesh() { return tileAt(this.x, this.z).props || tileAt(this.x, this.z).mesh; } };
+    });
+    applyPlayers(s);
+    players.forEach(pl => { const b = pl.baseBar; b.userData.shown = pl.baseHp / STAGES[pl.stage].hp; b.userData.fill.scale.x = Math.max(0.0001, BAR_W * pl.baseHp / STAGES[pl.stage].hp); });
+    (s.units || []).forEach(unitFromData);
+    (s.bandits || []).forEach(banditFromData);
+    (s.walls || []).forEach(w => { const ww = addWall(tileAt(w.a[0], w.a[1]), tileAt(w.b[0], w.b[1])); ww.hp = w.hp; ww.mesh.scale.set(1, 1, 1); if (w.hp < WALL_HP) { ww.bar.visible = true; ww.bar.userData.fill.scale.x = BAR_W * w.hp / WALL_HP; } });
+    (s.mines || []).forEach(([k, o]) => mineMesh(k, o));
+    online.mapId = s.mapId;
+    $('over').hidden = true; $('report').hidden = true; $('handoff').hidden = true;
+    online.applying = false;
+    focusBase(true);
+  }
+  function applySnapshot(s) {
+    if (!tiles || !tiles.length || online.mapId !== s.mapId || !players.length) { buildFromSnapshot(s); return finishApply(s); }
+    online.applying = true;
+    s.tiles.forEach((d, i) => {
+      const t = tiles[i]; const [ty, amount, max, ow, crops] = d; const o = ow === -1 ? null : ow;
+      const cj = JSON.stringify(crops || null), cur = JSON.stringify(t.crops ? t.crops.map(c => c.planted) : null);
+      if (t.type !== ty || t.owner !== o || (ty === 'farm' && cj !== cur)) {
+        if (ty === 'bridge' && t.mesh.material === waterMat) t.mesh.material = new THREE.MeshStandardMaterial({ color: 0x2f6f9a, roughness: 0.25 });
+        if (ty === 'water' && t.mesh.material !== waterMat && t.mesh.geometry === waterGeo) t.mesh.material = waterMat;
+        t.owner = o; t.crops = crops ? crops.map(p => ({ planted: p })) : (ty === 'farm' ? [] : null); t.amount = amount;
+        setTileType(t, ty); t.max = max;
+      } else if (t.amount !== amount) {
+        t.amount = amount;
+        if (t.props && t.max && YIELD[ty]) { const sc = 0.5 + 0.5 * (amount / t.max); t.props.scale.set(sc, sc, sc); }
+      }
+    });
+    applyPlayers(s);
+    // units
+    const seen = new Set();
+    (s.units || []).forEach(d => {
+      seen.add(d.id);
+      let u = units.find(q => q.id === d.id);
+      if (!u) { u = unitFromData(d); return; }
+      if (u.x !== d.x || u.z !== d.z) { u.x = d.x; u.z = d.z; hop(u.mesh, posOf(d.x, d.z), 320, 0.3); }
+      const hadArmor = u.armor;
+      Object.assign(u, { hp: d.hp, moved: d.moved, done: d.done, hungry: d.hungry, silver: d.silver, sword: d.sword, wornSword: d.wornSword, armor: d.armor, scope: d.scope,
+        bubble: d.bubble, power: d.power, drug: d.drug, fought: d.fought, extraMoves: d.extraMoves, tools: new Set(d.tools || []) });
+      if (d.horse && !u.horse) { u.horse = true; addHorse(u); }
+      if (hadArmor !== u.armor) u.mesh.userData.bar.userData.max = maxHpU(u);
+      if (Math.abs(u.mesh.userData.bar.userData.shown - u.hp / maxHpU(u)) > 0.001) setBar(u.mesh.userData.bar, u.hp);
+    });
+    units.filter(u => !seen.has(u.id)).forEach(u => { world.remove(u.mesh); });
+    units = units.filter(u => seen.has(u.id));
+    // bandits
+    const bseen = new Set();
+    (s.bandits || []).forEach(d => {
+      bseen.add(d.id);
+      const b = bandits.find(q => q.id === d.id);
+      if (!b) { banditFromData(d); return; }
+      if (b.hp !== d.hp) { b.hp = d.hp; setBar(b.mesh.userData.bar, b.hp); }
+    });
+    bandits.filter(b => !bseen.has(b.id)).forEach(b => world.remove(b.mesh));
+    bandits = bandits.filter(b => bseen.has(b.id));
+    // lair
+    if (lair && s.lair) {
+      if (lair.hp !== s.lair.hp) { lair.hp = s.lair.hp; setBar(lair.bar, lair.hp); }
+      if (lair.alive && !s.lair.alive) { lair.alive = false; world.remove(lair.bar); }
+    }
+    // walls
+    const wkeys = new Set();
+    (s.walls || []).forEach(w => {
+      const a = tileAt(w.a[0], w.a[1]), b = tileAt(w.b[0], w.b[1]), k = edgeKey(a, b); wkeys.add(k);
+      let ww = walls.get(k); if (!ww) ww = addWall(a, b);
+      if (ww.hp !== w.hp) { ww.hp = w.hp; ww.bar.visible = true; setBar(ww.bar, w.hp); }
+    });
+    [...walls.values()].filter(w => !wkeys.has(w.key)).forEach(removeWall);
+    // mines
+    const mkeys = new Set((s.mines || []).map(([k]) => k));
+    (s.mines || []).forEach(([k, o]) => { if (!mines.has(k)) mineMesh(k, o); });
+    [...mines.keys()].filter(k => !mkeys.has(k)).forEach(k => { world.remove(mines.get(k).mesh); mines.delete(k); });
+    online.applying = false;
+    finishApply(s);
+  }
+  function finishApply(s) {
+    online.applying = true;
+    turn = s.turn; nextId = Math.max(nextId, s.nextId); phase = s.phase;
+    setCurrent(s.cp);
+    if (!isLocalTurn()) { selected = null; moves = new Map(); targets = []; busy = true; }
+    say(s.log || '');
+    if (s.over) {
+      $('overTitle').textContent = s.over.title; $('overText').textContent = s.over.text; $('over').hidden = false;
+    }
+    online.lastPushed = JSON.stringify(s);
+    refreshMarkers(); updateHUD();
+    online.applying = false;
+    // the turn has been handed to this device
+    const key = `${s.turn}:${s.cp}`;
+    if (s.phase === 'begin' && isLocalTurn() && online.began !== key) { online.began = key; busy = false; beginPlayerTurn(); }
+  }
+
   // ---------- Scripted AI (Normal) ----------
   // Priorities: 1) never starve: predict next upkeep and gather food first; 2) grow to Town and build a farm;
   // 3) attack bandits that come close, peasants included; 4) gather what the next goal needs.
@@ -2867,6 +3262,7 @@
     $('overTitle').style.color = players[i].css;
     $('overText').textContent = `${why} The ${FACTIONS[players[i].faction].name} took ${turn} turn${turn === 1 ? '' : 's'}.`;
     $('over').hidden = false;
+    if (online.on) pushState(true);
   }
 
   // ---------- Farm ----------
@@ -3080,7 +3476,7 @@
 
   // ---------- Feedback ----------
   function refreshMarkers() {
-    mines.forEach(m => { m.mesh.visible = m.owner === cp; });   // only the owner sees their mines
+    mines.forEach(m => { m.mesh.visible = m.owner === viewerSeat(); });   // only the owner sees their mines
     tiles.forEach(t => { if (t.mesh.material !== waterMat) t.mesh.material.emissive.setHex(0x000000); });
     units.forEach(u => {
       const d = u.mesh.userData;
@@ -3113,7 +3509,7 @@
     $('turn').textContent = turn;
     const who = $('who');
     who.hidden = !players.length;
-    if (players.length) { who.textContent = (players.length > 1 ? `${P().name}${P().ai ? ' (AI)' : ''} · ` : '') + `${FACTIONS[fac()].name} · ${STAGES[P().stage].name}`; who.style.color = P().css; }
+    if (players.length) { who.textContent = (players.length > 1 ? `${P().name}${P().nick ? ' (' + P().nick + ')' : P().ai ? ' (AI)' : ''} · ` : '') + `${FACTIONS[fac()].name} · ${STAGES[P().stage].name}`; who.style.color = P().css; }
     const ab = $('ability'), aw = $('abilWrap');
     aw.hidden = phase !== 'move' || !players.length;
     if (!aw.hidden) {
@@ -3138,13 +3534,14 @@
     $('res-food').classList.toggle('warn', stock.food < eat);
 
     const moving = phase === 'move' && !busy && !aiRunning;
-    document.getElementById('bottom').classList.toggle('ai-turn', aiRunning);
+    document.getElementById('bottom').classList.toggle('ai-turn', aiRunning || !isLocalTurn());
     $('build').hidden = !placing;
     $('build').textContent = placing && placing.count ? 'Done building' : placing && ['lightning', 'landmine'].includes(placing.kind) ? 'Cancel' : 'Cancel build';
     if (popTile) renderPopup();
     $('skip').disabled = !selected || busy;
     $('skipLbl').textContent = selected && selected.moved ? 'Done' : 'Hold';
     $('undo').disabled = !moving || !undoStack.length;
+    schedulePush();
     const owned = Object.keys(ITEMS).reduce((n, k) => n + items[k], 0);
     $('invCount').textContent = owned ? `×${owned}` : '';
     $('invBtn').disabled = !players.length;
@@ -3159,7 +3556,9 @@
     em.classList.toggle('nudge', moving && mine().every(u => u.done));
 
     const t = hoverTile || (selected && tileAt(selected.x, selected.z));
-    if (placing) {
+    if (online.on && !isLocalTurn() && phase !== 'over') {
+      $('infoT').textContent = `Waiting for ${P().name}${P().nick ? ' (' + P().nick + ')' : P().ai ? ' (AI)' : ''}…`;
+    } else if (placing) {
       $('infoT').textContent = { farm: 'Placing the farm', smith: 'Placing the blacksmith', wizard: 'Placing the wizard tower', landmine: 'Hiding a landmine', lightning: 'Choose a lightning target', barracks: 'Placing the barracks', bridge: 'Building a bridge', wall: 'Building walls', tower: 'Building a watchtower' }[placing.kind];
     } else if (phase === 'move' && selected) {
       const left = mine().filter(u => !u.done).length;
@@ -3183,7 +3582,8 @@
     } else if (phase === 'move') {
       $('infoT').textContent = busy ? 'Moving…' : 'All units are done. End moves when ready.';
     } else {
-      if (aiRunning) $('infoT').textContent = `${P().name} (AI) is thinking…`; else $('infoT').textContent = { gather: 'Gather phase', bandits: 'Combat phase', upkeep: 'Upkeep phase', end: 'Turn ending', over: 'Game over' }[phase] || '';
+      if (online.on && !isLocalTurn() && phase !== 'over') $('infoT').textContent = `Waiting for ${P().name}${P().nick ? ' (' + P().nick + ')' : P().ai ? ' (AI)' : ''}…`;
+      else if (aiRunning) $('infoT').textContent = `${P().name} (AI) is thinking…`; else $('infoT').textContent = { gather: 'Gather phase', bandits: 'Combat phase', upkeep: 'Upkeep phase', end: 'Turn ending', over: 'Game over' }[phase] || '';
     }
     let sub = t ? describe(t) : '';
     if (t) {
@@ -3231,7 +3631,7 @@
   }
 
   function handleTap(x, y) {
-    if (busy || phase !== 'move' || aiRunning) return;
+    if (busy || phase !== 'move' || aiRunning || !isLocalTurn()) return;
     const hit = pick(x, y);
     if (popTile) closePopup();
     if (!hit) return;
@@ -3385,19 +3785,26 @@
       return;
     }
     clearTimeout(restartTimer); b.classList.remove('confirm'); b.textContent = 'Restart map';
+    if (online.on) leaveRoom('You left the online game.');
     $('intro').hidden = false;
   });
   $('again').addEventListener('click', () => { $('over').hidden = true; $('intro').hidden = false; });
   $('start').addEventListener('click', () => { $('intro').hidden = true; newGame(chosen, factionPicks.slice(), seatPicks.slice()); });
   $('ability').addEventListener('click', useAbility);
   $('hoGo').addEventListener('click', closeHandoff);
+  $('olCreate').addEventListener('click', createRoom);
+  $('olJoin').addEventListener('click', joinRoom);
+  $('lbStart').addEventListener('click', startOnline);
+  $('lbLeave').addEventListener('click', () => leaveRoom());
+  try { const nm = localStorage.getItem('roth-name'); if (nm) $('olName').value = nm; } catch (e) {}
+  $('olName').addEventListener('change', () => { try { localStorage.setItem('roth-name', $('olName').value.trim()); } catch (e) {} });
   $('reportGo').addEventListener('click', closeReport);
 
   const keys = new Set();
   window.addEventListener('keydown', e => {
     if (e.target.closest && e.target.closest('button') && (e.key === ' ' || e.key === 'Enter')) return;
-    if (!$('intro').hidden) return;
-    if (aiRunning && e.key !== 'w' && e.key !== 'a' && e.key !== 's' && e.key !== 'd' && !e.key.startsWith('Arrow')) return;
+    if (!$('intro').hidden || !$('lobby').hidden) return;
+    if ((aiRunning || !isLocalTurn()) && e.key !== 'w' && e.key !== 'a' && e.key !== 's' && e.key !== 'd' && !e.key.startsWith('Arrow')) return;
     if (!$('handoff').hidden) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); closeHandoff(); } return; }
     if (!$('report').hidden) { if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') { e.preventDefault(); closeReport(); } return; }
     if (e.key === ' ') { e.preventDefault(); hold(); }

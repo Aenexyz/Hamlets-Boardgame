@@ -19,9 +19,17 @@ Each turn runs through five phases:
 ## Features
 
 - Five factions, each with its own hero and hero ability: Hearthfolk, Ironwood Wolfmen, Merfolk, Ashen Orcs, and Stoneheart Dwarves
-- 1–4 players on one device, with optional AI opponents
+- 1–4 players: online with friends on their own devices (room codes), on one shared device, or against AI opponents
 - A river splitting the map, crossable by building bridges, and a bandit lair on an island in the middle
 - Farms, barracks, a blacksmith, a wizard tower with magic scrolls, walls, watchtowers, and hidden landmines
+
+## Playing online
+
+1. Open the game, type your name, and press **Create room**. Share the room code with your friends.
+2. Friends open the same link, type their name and the code, and press **Join room**.
+3. Everyone picks a faction in the lobby. The host can turn empty seats into AI players, then presses **Start game**.
+
+Each player takes their turn on their own device while everyone else watches the moves live. The host's device also plays the AI seats, so the host should stay connected. Online play uses Firebase.
 
 ## Controls
 

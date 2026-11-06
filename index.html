@@ -479,7 +479,7 @@
     orc:    { name: 'Ashen Orcs',         hero: 'grukk',
               perks: 'Every unit has +1 HP. Gather 1 less on everything.',
               heroText: 'Grukk (6 HP, hits 2). Bandits he kills drop double loot.',
-              ability: 'Healing totem', abilityText: 'A healing totem rises next to Grukk for 2 turns. It can\'t move, and heals your units within 2 hexes for 2 HP each turn and ends their hunger.' },
+              ability: 'Healing totem', abilityText: 'A healing totem rises next to Grukk for 2 turns. It can\'t move, and heals your units within 2 hexes for 2 HP each turn. Units in range never go hungry or starve, and can still gather.' },
     dwarf:  { name: 'Stoneheart Dwarves', hero: 'durnik',
               perks: 'Quarries and gold veins never roll 0, and gold rolls higher. Every 4th upkeep costs double food.',
               heroText: 'Durnik (4 HP, gathers). Digs twice on quarries and gold veins; emptied veins become quarries.',
@@ -489,7 +489,8 @@
   const ABILITY_CD = 4;            // turns between hero abilities
   const AI_FOOD_EVERY = 3, AI_FOOD_BONUS = 8;   // AI players get 8 food every 3rd turn
   const SUMMON_CAP = 3;            // tamed wolves alive at once
-  const TOTEM_TURNS = 2, TOTEM_HEAL = 2, TOTEM_RANGE = 2;   // Grukk's healing totem: heals on the turn it rises and the next
+  const TOTEM_TURNS = 2, TOTEM_HEAL = 2, TOTEM_RANGE = 2;
+  const nearTotem = u => units.some(t => t.owner === u.owner && UNITS[t.kind].totem && t !== u && dist(t, u) <= TOTEM_RANGE);   // Grukk's healing totem: heals on the turn it rises and the next
   const HERO_RETURN = 3;           // turns before a fallen hero returns
   const HERO_REVIVE_GOLD = 2;
   const DWARF_MINE = [[1, 35], [2, 38], [3, 27]];   // about 1.9 gold, never 0
@@ -1366,7 +1367,8 @@
       world.add(bar); pl.baseBar = bar;
       pl.baseObj = { isBase: true, owner: i, x: pl.base.x, z: pl.base.z, get mesh() { return tileAt(this.x, this.z).props || tileAt(this.x, this.z).mesh; } };
       setCurrent(i);
-      addUnit('peasant', BASE.x, BASE.z);
+      const first = nearestFreeToBase();
+      addUnit('peasant', first.x, first.z);
       const second = nearestFreeToBase();
       addUnit('peasant', second.x, second.z);
       const hs = nearestFreeToBase();
@@ -1592,9 +1594,10 @@
     return null;
   }
 
-  function nearestFreeToBase() {
+  function nearestFreeToBase() {   // the closest free hex around the base (never the base tile itself)
     const start = tileAt(BASE.x, BASE.z);
-    const seen = new Set([start]); let q = [start];
+    const seen = new Set([start]); let q = neighbors(start).filter(n => walkable(n));
+    q.forEach(n => seen.add(n));
     while (q.length) {
       for (const t of q) if (!occupied(t)) return t;
       const next = [];
@@ -1650,6 +1653,7 @@
       if (u.fought) { u.fought = false; entry.skip = true; entry.notes.push({ cls: 'dim', text: 'Fought last turn instead of gathering.' }); return; }
       if (t.burn) { entry.skip = true; entry.notes.push({ cls: 'bad', text: 'This tile is on fire. Nothing can be gathered until it burns out.' }); floatAt(u.mesh.position, 'On fire!', '#ff7a3a'); return; }
       if (!ty.res || t.amount <= 0) { entry.skip = true; entry.notes.push({ cls: 'dim', text: 'Nothing to gather on this tile.' }); return; }
+      if (u.hungry && nearTotem(u)) { u.hungry = false; entry.notes.push({ cls: 'ev', text: 'The healing totem lifted their hunger.' }); }
       if (u.hungry) { entry.skip = true; entry.notes.push({ cls: 'bad', text: 'Too hungry to work. Feed them at upkeep.' }); floatAt(u.mesh.position, 'Too hungry to work', '#e0735a'); return; }
       if (ambushOK && raiders().length < MAX_BANDITS && Math.random() < BANDIT_CHANCE + (t.type === 'bank' ? BANK_AMBUSH : 0)) {
         entry.skip = true;
@@ -2128,13 +2132,16 @@
     }
     const need = fac() === 'dwarf' && P().upkeeps % 4 === 0 ? 2 : 1;
     if (need > 1) turnLog.push('Dwarven appetite: double food this upkeep.');
-    let fed = 0; const starved = [], hungry = [];
-    // who eats first when food runs short: heroes, then peasants, then everyone else
-    const eatOrder = u => UNITS[u.kind].hero ? 0 : u.kind === 'peasant' ? 1 : 2;
+    let fed = 0; const starved = [], hungry = [], spared = [];
+    // who eats first when food runs short: heroes, then peasants, then everyone else; units sheltered by a totem eat last
+    const eatOrder = u => (nearTotem(u) ? 10 : 0) + (UNITS[u.kind].hero ? 0 : u.kind === 'peasant' ? 1 : 2);
     [...mine()].filter(u => !UNITS[u.kind].noFood).sort((a, b) => eatOrder(a) - eatOrder(b)).forEach(u => {
       if (stock.food >= need) {
         stock.food -= need; fed += need; u.hungry = false;
         floatAt(u.mesh.position, `−${need} Food`, RES_COLOR.food);
+      } else if (nearTotem(u)) {   // Grukk's totem keeps them going: no hunger, no starving
+        u.hungry = false; spared.push(u);
+        floatAt(u.mesh.position, 'Totem: not hungry', '#7dff9a');
       } else if (u.hungry) {
         starved.push(u);
       } else {
@@ -2150,6 +2157,7 @@
       heroLost(u);
     });
     const parts = [...turnLog, `Upkeep: ${fed} food eaten.`];
+    if (spared.length) parts.push(`${spared.map(label).join(', ')} went without food, but the healing totem kept them from hunger.`);
     if (hungry.length) parts.push(`${hungry.map(label).join(', ')} went hungry.`);
     if (starved.length) parts.push(`${starved.map(label).join(', ')} starved.`);
     P().lastUpkeep = { starved: starved.map(label), hungry: hungry.map(label) };   // shown at the start of next turn
@@ -3580,7 +3588,7 @@
       s.mesh.scale.set(1, 0.01, 1);
       tween(500, (k, e) => { s.mesh.scale.set(1, 0.01 + 0.99 * e, 1); });
       const healed = totemHeal(s);
-      say(`Grukk raised a healing totem. ${healed.length ? `It healed ${healed.join(', ')}. ` : ''}It heals your units within ${TOTEM_RANGE} hexes for ${TOTEM_HEAL} HP and ends their hunger, now and at the start of your next turn.`);
+      say(`Grukk raised a healing totem. ${healed.length ? `It healed ${healed.join(', ')}. ` : ''}It heals your units within ${TOTEM_RANGE} hexes for ${TOTEM_HEAL} HP now and at the start of your next turn, and while it stands they never go hungry or starve.`);
     } else if (f === 'wolf') {
       const kind = 'wolf';
       const t = pickOne(freeNear(h));

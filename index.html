@@ -256,7 +256,7 @@
         <span class="pick-note" id="olMsg">Each friend plays on their own device. Uses the player count above.</span>
       </div>
       <details class="rules"><summary>How to play</summary>
-      <p><b>Grow your base</b> from Hamlet (10 HP) to Town (15 HP), City (20 HP) and finally Empire. Founding an empire wins; so does being the last base standing. Hamlets can build a farm for wheat seeds; towns unlock the barracks; cities unlock the blacksmith and the wizard tower. Units can attack bandits, rival units and rival bases.</p>
+      <p><b>Grow your base</b> from Hamlet (10 HP) to Town (15 HP), City (20 HP) and finally Empire. Founding an empire wins; so does being the last base standing. Hamlets can build a farm for wheat seeds; towns unlock the barracks; cities unlock the blacksmith and the wizard tower. Units can attack bandits, rival units and rival bases. Destroying a rival base plunders all its resources and inventory.</p>
       <p>Each player leads a <b>faction</b> with its own perks and a <b>hero</b> whose ability recharges every 4 turns. Fallen heroes return to the base after 3 turns for 2 gold.</p>
       <p>Up to 4 settlements share the land, one per corner, each with the same wheat, wood, stone and gold nearby. Players take turns on this device. A river splits the land. Open your base to build walls, watchtowers and bridges.</p>
       <ol>
@@ -3415,9 +3415,9 @@
     floatAt(pos, `Base −${n}`, '#ff9c84', 1.2);
     const who = by ? label(by) : 'A bandit';
     if (pl.baseHp > 0) { turnLog.push(`${who} hit ${owner === cp ? 'your' : pl.name + "'s"} base (${pl.baseHp}/${STAGES[pl.stage].hp}).`); say(turnLog[turnLog.length - 1]); return; }
-    destroyBase(owner, who);
+    destroyBase(owner, who, by);
   }
-  function destroyBase(owner, who) {
+  function destroyBase(owner, who, by) {
     const pl = players[owner];
     pl.alive = false;
     units.filter(u => u.owner === owner).forEach(u => world.remove(u.mesh));
@@ -3427,7 +3427,20 @@
     t.owner = null; setTileType(t, 'ruins');
     floatAt(posOf(t.x, t.z), `${pl.name} has fallen`, '#e0735a', 1.4);
     turnLog.push(`${who} destroyed ${pl.name}'s base.`);
+    // the conqueror takes everything left in the fallen base: resources and the whole inventory
+    const winner = by && by.owner != null && by.owner !== owner && players[by.owner] ? players[by.owner] : null;
+    if (winner) {
+      const res = RES.filter(r => pl.stock[r] > 0).map(r => { winner.stock[r] += pl.stock[r]; const n = pl.stock[r]; pl.stock[r] = 0; return `${n} ${r}`; });
+      const its = Object.keys(ITEMS).filter(k => pl.items[k] > 0).map(k => { winner.items[k] = (winner.items[k] || 0) + pl.items[k]; const n = pl.items[k]; pl.items[k] = 0; return `${n} × ${ITEMS[k].name.toLowerCase()}`; });
+      const loot = [...res, ...its];
+      if (loot.length) {
+        turnLog.push(`${winner.name} plundered ${loot.join(', ')}.`);
+        floatAt(posOf(t.x, t.z), `Plundered by ${winner.name}`, '#f0c43a', 1.75, 500);
+        RES.forEach(r => pulse(r, 'bump'));
+      } else turnLog.push(`There was nothing left to plunder.`);
+    }
     say(turnLog.join(' '));
+    updateHUD();
     checkLastStanding();
   }
   function checkLastStanding() {

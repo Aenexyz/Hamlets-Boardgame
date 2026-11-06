@@ -383,6 +383,7 @@
              { p: 0.03,  text: 'found a bandit stash', stash: true },
              { p: 0.05,  text: 'found lost gold coins in the river', gainRange: { gold: [1, 3] } },
              { p: 0.05,  text: 'met a river merchant', merchant: true },
+             { p: 0.04,  text: 'caught a food crate floating down the river', crate: true },
              { p: 0.04,  text: 'found an old fishing pole', item: 'pole' },
              { p: 0.04,  text: 'found worn-out boots', item: 'boots' },
              { p: 0.015, text: 'found a silver axe by the river', item: 'silveraxe', once: 'silveraxe' }],
@@ -1521,6 +1522,10 @@
       stock.food += AI_FOOD_BONUS; got.push(['food', AI_FOOD_BONUS]); pulse('food', 'bump');
       floatAt(posOf(BASE.x, BASE.z), `+${AI_FOOD_BONUS} Food (AI supplies)`, RES_COLOR.food, 1.3);
     }
+    if (P().ai) {   // AI players get a little building material every turn
+      stock.wood += 1; stock.stone += 1; got.push(['wood', 1], ['stone', 1]);
+      pulse('wood', 'bump'); pulse('stone', 'bump');
+    }
     if (turn > 1) harvestFarm(report, got);
     const lu = P().lastUpkeep;
     if (lu && (lu.starved.length || lu.hungry.length)) {
@@ -1612,6 +1617,11 @@
           items.seed += k;
           floatAt(u.mesh.position, `+${k} Wheat seed${k > 1 ? 's' : ''}`, '#c8e38a', 1.15, 450);
           entry.notes.push({ cls: 'ev', text: `Found ${k} wheat seed${k > 1 ? 's' : ''}. ${P().farm ? 'Plant them at your farm.' : 'Build a farm to plant them.'}` });
+        }
+        if (ev.crate) {
+          P().feast = true; P().feastWhy = 'crate';
+          floatAt(u.mesh.position, 'Food crate!', RES_COLOR.food, 1.15, 450);
+          entry.notes.push({ cls: 'ev', text: 'Caught a food crate floating down the river. Nobody needs food at this upkeep.' });
         }
         if (ev.merchant) {
           P().merchant = { left: MERCHANT_TRADES, tile: t };
@@ -1810,9 +1820,10 @@
     const pos = b.mesh.position.clone();
     tween(350, (k, e) => { const s = 1 - e * 0.99; b.mesh.scale.set(s, s, s); b.mesh.rotation.y += 0.25; }, () => world.remove(b.mesh));
     const drop = rollDrop();
+    const seeds = seedDrop();
     const bonus = by.kind === 'grukk' ? rollDrop() : null;   // Grukk's bounty
-    floatAt(pos, `${cap(banditName(b))} defeated! ${drop.label}${bonus ? ' + ' + bonus.label : ''}`, '#f3e6c4', 1.2, 300);
-    say(`${label(by)} defeated a ${banditName(b)}. It dropped ${drop.text}${bonus ? `, and Grukk's bounty adds ${bonus.text}` : ''}.`);
+    floatAt(pos, `${cap(banditName(b))} defeated! ${drop.label} · ${seeds.label}${bonus ? ' + ' + bonus.label : ''}`, '#f3e6c4', 1.2, 300);
+    say(`${label(by)} defeated a ${banditName(b)}. It dropped ${drop.text} and ${seeds.text}${bonus ? `, and Grukk's bounty adds ${bonus.text}` : ''}.`);
     updateHUD();
   }
 
@@ -1836,10 +1847,17 @@
   }
 
   function rollDrop() {
+    // one random prize: gold, a worn-out tool, a demon drug or a shield scroll
     const r = Math.random();
-    if (r < 0.45) { const g = randInt(2, 4); stock.gold += g; pulse('gold', 'bump'); return { label: `+${g} Gold`, text: `${g} gold` }; }
-    if (r < 0.9) { const k = pickOne(DROP_TOOLS); items[k]++; return { label: ITEMS[k].name, text: `a ${ITEMS[k].name.toLowerCase()}` }; }
-    stock.food += 3; pulse('food', 'bump'); return { label: '+3 Food', text: 'a sack of 3 food' };
+    if (r < 0.35) { const g = randInt(2, 4); stock.gold += g; pulse('gold', 'bump'); return { label: `+${g} Gold`, text: `${g} gold` }; }
+    const k = r < 0.7 ? pickOne(DROP_TOOLS) : r < 0.85 ? 'drug' : 'shield';
+    items[k]++;
+    const nm = ITEMS[k].name.toLowerCase();
+    return { label: ITEMS[k].name, text: `${/boots$/.test(nm) ? 'a pair of' : /^[aeiou]/.test(nm) ? 'an' : 'a'} ${nm}` };
+  }
+  function seedDrop() {   // every bandit carries a pouch of 1-6 wheat seeds
+    const k = randInt(1, 6); items.seed += k;
+    return { label: `+${k} Seed${k > 1 ? 's' : ''}`, text: `${k} wheat seed${k > 1 ? 's' : ''}` };
   }
 
   function heroLost(u) {
@@ -1942,9 +1960,10 @@
     if (!mine().length) { P().alive = false; say(`${P().name}'s settlement has fallen.`); return later(nextPlayer, 1200); }
     P().upkeeps++;
     if (P().feast) {
-      P().feast = false;
-      say([...turnLog, 'Harvest feast: nobody needed food this upkeep.'].join(' '));
-      mine().forEach(u => floatAt(u.mesh.position, 'Feast!', RES_COLOR.food));
+      const crate = P().feastWhy === 'crate';
+      P().feast = false; P().feastWhy = null;
+      say([...turnLog, crate ? 'Food crate: nobody needed food this upkeep.' : 'Harvest feast: nobody needed food this upkeep.'].join(' '));
+      mine().forEach(u => floatAt(u.mesh.position, crate ? 'Crate!' : 'Feast!', RES_COLOR.food));
       refreshMarkers(); updateHUD();
       return later(() => { phase = 'end'; updateHUD(); later(nextPlayer, 450); }, 900);
     }
@@ -2507,7 +2526,7 @@
         idx: pl.idx, faction: pl.faction, ai: pl.ai, uid: pl.uid || null, nick: pl.nick || null,
         stock: pl.stock, items: pl.items, found: pl.found, merchant: pl.merchant ? { left: pl.merchant.left, t: xy(pl.merchant.tile) } : null,
         stage: pl.stage, baseHp: pl.baseHp, farm: xy(pl.farm), smith: xy(pl.smith), wizard: xy(pl.wizard), barracks: xy(pl.barracks),
-        alive: pl.alive, cd: pl.cd, feast: pl.feast, upkeeps: pl.upkeeps, heroDown: pl.heroDown, timeScroll: !!pl.timeScroll, lastUpkeep: pl.lastUpkeep || null,
+        alive: pl.alive, cd: pl.cd, feast: pl.feast, feastWhy: pl.feastWhy || null, upkeeps: pl.upkeeps, heroDown: pl.heroDown, timeScroll: !!pl.timeScroll, lastUpkeep: pl.lastUpkeep || null,
       })),
       tiles: tiles.map(t => [t.type, t.amount, t.max, t.owner == null ? -1 : t.owner, t.crops ? t.crops.map(c => c.planted) : null]),
       units: units.map(u => ({ id: u.id, owner: u.owner, kind: u.kind, num: u.num, x: u.x, z: u.z, hp: u.hp, moved: u.moved, done: u.done, hungry: u.hungry,
@@ -2568,7 +2587,7 @@
   function applyPlayers(s) {
     s.players.forEach((d, i) => {
       const pl = players[i];
-      Object.assign(pl, { faction: d.faction, ai: d.ai, uid: d.uid, nick: d.nick, found: d.found || {}, alive: d.alive, cd: d.cd, feast: d.feast, upkeeps: d.upkeeps, heroDown: d.heroDown || null, timeScroll: d.timeScroll, lastUpkeep: d.lastUpkeep || null });
+      Object.assign(pl, { faction: d.faction, ai: d.ai, uid: d.uid, nick: d.nick, found: d.found || {}, alive: d.alive, cd: d.cd, feast: d.feast, feastWhy: d.feastWhy || null, upkeeps: d.upkeeps, heroDown: d.heroDown || null, timeScroll: d.timeScroll, lastUpkeep: d.lastUpkeep || null });
       Object.keys(pl.stock).forEach(k => delete pl.stock[k]); Object.assign(pl.stock, d.stock);
       Object.keys(pl.items).forEach(k => { pl.items[k] = (d.items && d.items[k]) || 0; });
       ['farm', 'smith', 'wizard', 'barracks'].forEach(k => { pl[k] = d[k] ? tileAt(d[k][0], d[k][1]) : null; });
@@ -2788,11 +2807,7 @@
   }
 
   function aiAbility() {
-    if (abilityBlock()) return;
-    const f = fac();
-    if (f === 'hearth' && stock.food >= eatersNext() * 2) return;   // save the feast for a lean upkeep
-    if (f === 'mer' && !bandits.some(b => mine().some(u => dist(u, b) <= 3))) return;   // bubbles when danger is near
-    useAbility();
+    if (!abilityBlock()) useAbility();   // AI heroes cast whenever the ability is ready
   }
 
   // attack bandits that threaten the settlement, with fighters first and peasants if needed
@@ -2912,9 +2927,15 @@
       .sort((a, b) => (a.kind === 'wolf' ? 0 : 1) - (b.kind === 'wolf' ? 0 : 1));
     for (const u of hunters) {
       if (!aiStillValid(token)) return;
-      const prey = bandits.filter(b => dist(b, u) <= HUNT_RANGE).sort((a, b) => a.hp - b.hp || dist(a, u) - dist(b, u))[0];
+      let prey = bandits.filter(b => dist(b, u) <= HUNT_RANGE).sort((a, b) => a.hp - b.hp || dist(a, u) - dist(b, u))[0];
+      if (!prey && u.kind === 'wolf') {   // no bandits around: raid rival peasants
+        prey = units.filter(e => e.owner !== cp && e.kind === 'peasant' && players[e.owner] && players[e.owner].alive)
+          .sort((a, b) => dist(a, u) - dist(b, u))[0];
+      }
       if (!prey) continue;
-      if (canReach(u, prey)) { attack(u, prey); await idle(); await sleep(220); continue; }
+      // a rival hunchback in the way has to be struck first
+      const strikeAt = p => { if (!units.includes(p)) return p; const l = inRange(u); return l.includes(p) ? p : l.find(e => units.includes(e) && e.owner === p.owner) || null; };
+      if (canReach(u, prey) && strikeAt(prey)) { attack(u, strikeAt(prey)); await idle(); await sleep(220); continue; }
       const reach = reachable(u);
       let best = null;
       reach.forEach((path, t) => {
@@ -2928,7 +2949,7 @@
       moveAlong(u, best.path);
       await idle(); await sleep(150);
       if (!aiStillValid(token)) return;
-      if (bandits.includes(prey) && canReach(u, prey) && !u.done) { attack(u, prey); await idle(); await sleep(220); }
+      if ((bandits.includes(prey) || units.includes(prey)) && canReach(u, prey) && !u.done && strikeAt(prey)) { attack(u, strikeAt(prey)); await idle(); await sleep(220); }
       u.done = true;
     }
   }
@@ -3025,7 +3046,7 @@
     undoStack = [];   // hero abilities can't be undone
     castPillar(h);
     if (f === 'hearth') {
-      P().feast = true;
+      P().feast = true; P().feastWhy = 'feast';
       floatAt(h.mesh.position, 'Harvest feast!', RES_COLOR.food, 1.2);
       say('Brena calls a harvest feast. Nobody will need food at this upkeep.');
     } else if (f === 'wolf' || f === 'orc') {
@@ -3530,7 +3551,7 @@
     RES.forEach(r => { $('n-' + r).textContent = stock[r]; });
     const dbl = fac() === 'dwarf' && (P().upkeeps + 1) % 4 === 0;
     const eat = P().feast ? 0 : mine().filter(u => !UNITS[u.kind].noFood).length * (dbl ? 2 : 1);
-    $('l-food').textContent = `Food · eats ${eat}${P().feast ? ' (feast)' : dbl ? ' (double)' : ''}`;
+    $('l-food').textContent = `Food · eats ${eat}${P().feast ? (P().feastWhy === 'crate' ? ' (crate)' : ' (feast)') : dbl ? ' (double)' : ''}`;
     $('res-food').classList.toggle('warn', stock.food < eat);
 
     const moving = phase === 'move' && !busy && !aiRunning;

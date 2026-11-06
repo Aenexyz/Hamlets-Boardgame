@@ -260,7 +260,7 @@
       <p>Each player leads a <b>faction</b> with its own perks and a <b>hero</b> whose ability recharges every 4 turns. Fallen heroes return to the base after 3 turns for 2 gold.</p>
       <p>Up to 4 settlements share the land, one per corner, each with the same wheat, wood, stone and gold nearby. Players take turns on this device. A river splits the land. Open your base to build walls, watchtowers and bridges.</p>
       <ol>
-        <li><b>Gather.</b> Each peasant collects from its tile. Now and then a bandit ambushes them, and the peasant runs home.</li>
+        <li><b>Gather.</b> Each peasant collects from its tile. Now and then a bandit ambushes them, and the peasant runs home (heroes just step back one hex).</li>
         <li><b>Move.</b> Peasants move up to 2 tiles, fighters up to 3, then may attack a bandit in range. A peasant who fights skips its next gather.</li>
         <li><b>Combat.</b> Each bandit hits a unit next to it for 1, then steals 1 food and 1 other resource.</li>
         <li><b>Upkeep.</b> Every unit eats 1 food. Unfed units go hungry; unfed twice, they starve.</li>
@@ -272,8 +272,8 @@
         <span><i class="sw" style="background:#6e5f4c"></i>Gold vein → 0–3 gold</span>
         <span><i class="sw" style="background:#c9b98a"></i>Riverbank → 0–4 food, plus river finds</span>
       </div>
-      <p>On an island in the middle of the river sits a <b>bandit lair</b> (8 HP), ringed by bone-strewn grounds you can cross at your own risk. Its guards don't steal, but they hit anyone who comes close, and a new one comes out every 3 turns. Destroy the lair for its hoard.</p>
-      <p>Bandits have 3 HP and drop gold or tools when killed. Build a barracks to train footmen (3 HP, hit for 2) and archers (shoot 3 tiles away).</p>
+      <p>On an island in the middle of the river sits a <b>bandit lair</b> (8 HP), ringed by bone-strewn grounds you can cross at your own risk. Its guards don't steal, but they hit anyone who comes close, and a new one comes out every 3 turns. The lair also hurls spears at up to 2 units within 3 hexes each turn, for 2 damage. Destroy it for its hoard. After that, a bandit tent with a single bandit pops up on a random meadow every 10 player turns.</p>
+      <p>Bandits have 3 HP. When killed they drop gold, a worn-out tool, a demon drug or a shield scroll, plus 1–6 wheat seeds. A farm harvest saves a seed half the time. Build a barracks to train footmen (3 HP, hit for 2) and archers (shoot 3 tiles away).</p>
       </details>
       <p style="color:var(--muted);font-size:13.5px">Drag to rotate. Right-drag, two fingers or WASD to pan. Scroll or pinch to zoom.</p>
     </div>
@@ -359,11 +359,11 @@
   };
   // Harvest odds: [amount, weight]. Zero is rare on purpose.
   const YIELD = {
-    forest: [[0, 5], [1, 20], [2, 35], [3, 27], [4, 13]],   // about 2.2 wood on average
-    field:  [[0, 5], [1, 15], [2, 30], [3, 30], [4, 20]],   // about 2.5 food
-    quarry: [[0, 10], [1, 30], [2, 34], [3, 20], [4, 6]],   // about 1.8 stone
-    mine:   [[0, 22], [1, 40], [2, 26], [3, 12]],           // about 1.3 gold
-    bank:   [[0, 10], [1, 25], [2, 30], [3, 22], [4, 13]],   // about 2 food (fish)
+    forest: [[0, 2], [1, 20], [2, 35], [3, 27], [4, 13]],   // about 2.2 wood on average
+    field:  [[0, 2], [1, 15], [2, 30], [3, 30], [4, 20]],   // about 2.5 food
+    quarry: [[0, 4], [1, 30], [2, 34], [3, 20], [4, 6]],   // about 1.8 stone
+    mine:   [[0, 10], [1, 40], [2, 26], [3, 12]],           // about 1.3 gold
+    bank:   [[0, 4], [1, 25], [2, 30], [3, 22], [4, 13]],   // about 2 food (fish)
   };
   // Random finds, at most one per peasant per gather. p is the chance each turn.
   const EVENTS = {
@@ -516,6 +516,9 @@
   const MAX_BANDITS = 4;         // cap on roaming (ambush) bandits
   const LAIR = { x: 10, z: RIVER_Z };  // an island in the middle of the river
   const LAIR_HP = 8;
+  const LAIR_SPEAR_RANGE = 3, LAIR_SPEAR_DMG = 2, LAIR_SPEAR_TARGETS = 2;   // the lair hurls spears at units that come close
+  const TENT_EVERY = 10;         // after the lair falls, a bandit tent pops up every 10 player turns
+  const FARM_SEED_CHANCE = 0.5;
   const LAIR_EVERY = 3;          // a new guard comes out every 3 turns...
   const LAIR_MAX_GUARDS = 3;     // ...while fewer than 3 guard it
   // Your side wears red; bandits wear black and purple.
@@ -1155,6 +1158,7 @@
   // ---------- State ----------
   let tiles, units, bandits, stock, items, turn, phase, selected, busy, nextId, placing, barracks, lair, walls = new Map(), ghosts = [], mines = new Map(), reportResume = false;
   let players = [], cp = 0, playerCount = 1;
+  let tentClock = 0;   // player turns since the last bandit tent (counts only once the lair has fallen)
   let timers = [], undoStack = [], moves = new Map(), targets = [], buildSpots = new Set(), turnLog = [];
   // odd-r offset coords -> cube coords for distance
   const cube = t => { const q = t.x - (t.z - (t.z & 1)) / 2; return [q, t.z, -q - t.z]; };
@@ -1282,7 +1286,7 @@
     timers.forEach(clearTimeout); timers = []; tweens.length = 0;
     while (world.children.length) { const c = world.children[0]; world.remove(c); if (c.geometry && c.geometry !== tileGeo && c.geometry !== waterGeo) c.geometry.dispose(); }
     movingUnit = null; closePopup(); aiToken++; aiRunning = false;
-    tiles = []; units = []; bandits = []; selected = null; busy = false; turn = 1; nextId = 1; placing = false; barracks = null; lair = null; walls = new Map(); ghosts = []; mines = new Map(); reportResume = false;
+    tiles = []; units = []; bandits = []; selected = null; busy = false; turn = 1; nextId = 1; tentClock = 0; placing = false; barracks = null; lair = null; walls = new Map(); ghosts = []; mines = new Map(); reportResume = false;
     undoStack = []; moves = new Map(); targets = []; buildSpots = new Set();
     setCurrent(0);
     const types = generateTypes();
@@ -1369,6 +1373,7 @@
     let guard = 0;
     do { i = (i + 1) % players.length; } while (!players[i].alive && ++guard <= players.length);
     if (i <= cp) turn++;
+    if (lair && !lair.alive && ++tentClock >= TENT_EVERY) { tentClock = 0; spawnTent(); }
     setCurrent(i);
     beginPlayerTurn();
   }
@@ -1406,7 +1411,41 @@
   }
   const raiders = () => bandits.filter(b => !b.guard);
   const guards = () => bandits.filter(b => b.guard);
-  const banditName = b => b.guard ? 'lair guard' : 'bandit';
+  const banditName = b => b.guard ? 'lair guard' : b.tent ? 'tent bandit' : 'bandit';
+
+  // ---------- Bandit tents (after the lair falls) ----------
+  const tentCanvas = new THREE.MeshStandardMaterial({ color: 0x8a5a3c, roughness: 0.9 });
+  function makeTent() {
+    const g = new THREE.Group();
+    const cloth = shadowed(new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.32, 4), tentCanvas)); cloth.position.y = 0.16; cloth.rotation.y = Math.PI / 4;
+    const flap = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.15, 0.01), M.cloak); flap.position.set(0, 0.075, 0.145);
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.14, 4), M.wood); pole.position.y = 0.36;
+    const rag = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.05, 0.005), M.darkRed); rag.position.set(0.04, 0.4, 0);
+    g.add(cloth, flap, pole, rag);
+    return g;
+  }
+  function attachTent(b) {
+    b.tent = true;
+    const m = makeTent();
+    m.traverse(o => { o.userData.banditId = b.id; });
+    const p = posOf(b.x, b.z); m.position.set(p.x + 0.24, p.y, p.z - 0.16); m.rotation.y = -0.5;
+    world.add(m); b.tentMesh = m;
+  }
+  function removeTent(b) {
+    if (!b.tentMesh) return;
+    const m = b.tentMesh; b.tentMesh = null;
+    tween(500, (k, e) => { m.scale.set(1, 1 - e * 0.99, 1); }, () => world.remove(m));
+  }
+  function spawnTent() {
+    const spots = tiles.filter(t => t.type === 'meadow' && walkable(t) && !occupied(t) && !banditAt(t.x, t.z)
+      && players.every(pl => !pl.alive || dist(pl.base, t) >= 4));
+    if (!spots.length) return null;
+    const t = pickOne(spots);
+    const b = addBandit(t.x, t.z, false, null);
+    attachTent(b);
+    floatAt(posOf(t.x, t.z), 'A bandit tent goes up', '#e0735a', 1.2, 300);
+    return b;
+  }
 
   // ---------- Walls sit on the edge between two hexes ----------
   const edgeKey = (a, b) => [`${a.x},${a.z}`, `${b.x},${b.z}`].sort().join('|');
@@ -1554,9 +1593,18 @@
       if (u.hungry) { entry.skip = true; entry.notes.push({ cls: 'bad', text: 'Too hungry to work. Feed them at upkeep.' }); floatAt(u.mesh.position, 'Too hungry to work', '#e0735a'); return; }
       if (ambushOK && raiders().length < MAX_BANDITS && Math.random() < BANDIT_CHANCE + (t.type === 'bank' ? BANK_AMBUSH : 0)) {
         entry.skip = true;
-        entry.notes.push({ cls: 'bad', text: 'Bandit ambush! Dropped everything and ran back to base.' });
         floatAt(u.mesh.position, 'Bandit!', '#e0735a', 1.1);
         addBandit(u.x, u.z, false, cp);
+        if (UNITS[u.kind].hero) {   // heroes stand their ground: just step aside to a free neighbouring hex
+          const here = tileAt(u.x, u.z);
+          // one hex back toward home if possible, otherwise any free neighbouring hex
+          const homeward = neighbors(here).filter(n => walkable(n) && !occupied(n) && !banditAt(n.x, n.z) && !wallBetween(here, n))
+            .sort((a, b) => dist(a, BASE) - dist(b, BASE))[0] || null;
+          if (homeward) { u.x = homeward.x; u.z = homeward.z; hop(u.mesh, posOf(homeward.x, homeward.z), 450, 0.4); }
+          entry.notes.push({ cls: 'bad', text: `Bandit ambush! ${homeward ? 'Stepped back one hex' : 'Held the spot'} and lost this gather.` });
+          return;
+        }
+        entry.notes.push({ cls: 'bad', text: 'Bandit ambush! Dropped everything and ran back to base.' });
         const safe = nearestFreeToBase();
         if (safe) { u.x = safe.x; u.z = safe.z; hop(u.mesh, posOf(safe.x, safe.z), 650, 0.8); }
         return;
@@ -1742,9 +1790,9 @@
 
   function select(u, focus = true) {
     cancelPlacing(false);
-    selected = (u && u.owner === cp && !u.done && phase === 'move') ? u : null;
-    moves = selected && !selected.moved ? reachable(selected) : new Map();
-    targets = selected && atkOf(selected) > 0 ? inRange(selected) : [];
+    selected = (u && u.owner === cp && phase === 'move') ? u : null;   // finished units can still be picked to hand them items
+    moves = selected && !selected.moved && !selected.done ? reachable(selected) : new Map();
+    targets = selected && !selected.done && atkOf(selected) > 0 ? inRange(selected) : [];
     if (selected && focus) cam.goal.set(selected.mesh.position.x, 0, selected.mesh.position.z);
     refreshMarkers(); updateHUD();
   }
@@ -1779,7 +1827,7 @@
   }
 
   function hold() {
-    if (!selected || busy) return;
+    if (!selected || busy || selected.done) return;
     undoStack.push({ type: 'hold', u: selected });
     selected.done = true;
     selectNext(false);
@@ -1817,6 +1865,7 @@
       return;
     }
     bandits.splice(bandits.indexOf(b), 1);
+    removeTent(b);
     const pos = b.mesh.position.clone();
     tween(350, (k, e) => { const s = 1 - e * 0.99; b.mesh.scale.set(s, s, s); b.mesh.rotation.y += 0.25; }, () => world.remove(b.mesh));
     const drop = rollDrop();
@@ -1842,7 +1891,7 @@
     items[t1]++; items[t2]++;
     floatAt(pos, 'Lair destroyed!', '#f3e6c4', 1.2, 200);
     floatAt(pos, `+${gold} Gold · +5 Food · 2 tools`, '#f0c43a', 1.55, 600);
-    say(`${label(by)} burned the bandit lair to the ground. The hoard: ${gold} gold, 5 food, a ${ITEMS[t1].name.toLowerCase()} and a ${ITEMS[t2].name.toLowerCase()}. No more guards will come out.`);
+    say(`${label(by)} burned the bandit lair to the ground. The hoard: ${gold} gold, 5 food, a ${ITEMS[t1].name.toLowerCase()} and a ${ITEMS[t2].name.toLowerCase()}. No more guards will come out, but bandit tents may now pop up on the meadows.`);
     updateHUD();
   }
 
@@ -1906,8 +1955,9 @@
       if (turnLog.length) say(turnLog.join(' '));
       later(upkeep, turnLog.length ? 650 : 250);
     };
-    if (!bandits.length) return wrapUp();
+    const runBandits = () => {
     if (phase === 'over') return;
+    if (!bandits.length) return wrapUp();
     const list = [...bandits]; let i = 0;
     const next = () => {
       if (phase === 'over') return;
@@ -1918,6 +1968,43 @@
       later(() => banditAct(b, () => later(next, 450)), 350);
     };
     next();
+    };
+    lairSpears(runBandits);
+  }
+
+  // the lair throws spears at up to two of the current player's units within range
+  const spearGeo = new THREE.CylinderGeometry(0.014, 0.014, 0.55, 5); spearGeo.rotateX(Math.PI / 2);
+  const spearTipGeo = new THREE.ConeGeometry(0.03, 0.09, 6); spearTipGeo.rotateX(Math.PI / 2);
+  function lairSpears(done) {
+    if (!lair || !lair.alive) return done();
+    const near = mine().filter(u => dist(u, lair) <= LAIR_SPEAR_RANGE).sort(() => Math.random() - 0.5).slice(0, LAIR_SPEAR_TARGETS);
+    if (!near.length) return done();
+    cam.goal.set(posOf(lair.x, lair.z).x, 0, posOf(lair.x, lair.z).z);
+    let i = 0;
+    const throwNext = () => {
+      if (phase === 'over') return;
+      if (i >= near.length) { say(turnLog.join(' ')); updateHUD(); return later(done, 400); }
+      const u = near[i++];
+      if (!units.includes(u)) return throwNext();
+      const from = posOf(lair.x, lair.z); from.y += 0.7;
+      const to = u.mesh.position.clone(); to.y += 0.3;
+      const spear = new THREE.Group();
+      spear.add(new THREE.Mesh(spearGeo, M.wood));
+      const tip = new THREE.Mesh(spearTipGeo, M.steel); tip.position.z = 0.3; spear.add(tip);
+      world.add(spear);
+      const prev = new THREE.Vector3();
+      tween(520, (k) => {
+        prev.copy(spear.position);
+        spear.position.lerpVectors(from, to, k); spear.position.y += Math.sin(Math.PI * k) * 0.9;
+        if (k > 0) spear.lookAt(spear.position.clone().add(spear.position.clone().sub(prev)));
+      }, () => {
+        world.remove(spear);
+        if (units.includes(u)) hurtUnit(u, LAIR_SPEAR_DMG, 'A spear from the bandit lair');
+        updateHUD();
+        later(throwNext, 250);
+      });
+    };
+    throwNext();
   }
 
   function banditAct(b, done) {
@@ -2532,7 +2619,8 @@
       units: units.map(u => ({ id: u.id, owner: u.owner, kind: u.kind, num: u.num, x: u.x, z: u.z, hp: u.hp, moved: u.moved, done: u.done, hungry: u.hungry,
         tools: [...u.tools], silver: !!u.silver, sword: !!u.sword, wornSword: u.wornSword || 0, armor: !!u.armor, scope: !!u.scope, horse: !!u.horse,
         bubble: !!u.bubble, power: u.power || 0, drug: !!u.drug, fought: !!u.fought, extraMoves: u.extraMoves || 0, rot: u.mesh.rotation.y })),
-      bandits: bandits.map(b => ({ id: b.id, x: b.x, z: b.z, hp: b.hp, guard: b.guard, target: b.target })),
+      bandits: bandits.map(b => ({ id: b.id, x: b.x, z: b.z, hp: b.hp, guard: b.guard, target: b.target, tent: !!b.tent })),
+      tentClock,
       lair: lair ? { hp: lair.hp, alive: lair.alive } : null,
       walls: [...walls.values()].map(w => ({ a: xy(w.a), b: xy(w.b), hp: w.hp })),
       mines: [...mines.entries()].map(([k, m]) => [k, m.owner]),
@@ -2572,6 +2660,7 @@
   function banditFromData(d) {
     const b = addBandit(d.x, d.z, d.guard, d.target);
     b.id = d.id; b.hp = d.hp; b.mesh.traverse(o => { o.userData.banditId = b.id; });
+    if (d.tent) attachTent(b);
     b.mesh.scale.set(1, 1, 1);
     const bar = b.mesh.userData.bar; bar.userData.shown = b.hp / BANDIT.hp; bar.userData.fill.scale.x = Math.max(0.0001, BAR_W * b.hp / BANDIT.hp);
     return b;
@@ -2693,7 +2782,7 @@
       if (!b) { banditFromData(d); return; }
       if (b.hp !== d.hp) { b.hp = d.hp; setBar(b.mesh.userData.bar, b.hp); }
     });
-    bandits.filter(b => !bseen.has(b.id)).forEach(b => world.remove(b.mesh));
+    bandits.filter(b => !bseen.has(b.id)).forEach(b => { world.remove(b.mesh); removeTent(b); });
     bandits = bandits.filter(b => bseen.has(b.id));
     // lair
     if (lair && s.lair) {
@@ -2717,7 +2806,7 @@
   }
   function finishApply(s) {
     online.applying = true;
-    turn = s.turn; nextId = Math.max(nextId, s.nextId); phase = s.phase;
+    turn = s.turn; nextId = Math.max(nextId, s.nextId); phase = s.phase; tentClock = s.tentClock || 0;
     setCurrent(s.cp);
     if (!isLocalTurn()) { selected = null; moves = new Map(); targets = []; busy = true; }
     say(s.log || '');
@@ -3003,6 +3092,8 @@
         prey = players.filter(pl => pl.idx !== cp && pl.alive && pl.baseObj).map(pl => pl.baseObj).sort((a, b) => dist(a, u) - dist(b, u))[0];
         if (!prey) return;
       }
+      // the river crossing runs past the lair: if the enemy is across the river, storm the lair first
+      if (lair && lair.alive && (prey.z < RIVER_Z) !== (u.z < RIVER_Z)) prey = lair;
       const pick = () => { const l = inRange(u); if (l.includes(prey)) return prey; return l.find(e => units.includes(e) && e.owner !== cp) || l.find(e => e.isBase) || null; };
       let tgt = pick();
       if (tgt) { attack(u, tgt); await idle(); await sleep(220); continue; }
@@ -3013,7 +3104,8 @@
         const d = dist(t, prey);
         const strike = d >= 1 && d <= rangeOf(u) && !(rangeOf(u) === 1 && wallBetween(t, tileAt(prey.x, prey.z)));
         const w = wd.has(t) ? wd.get(t) : far;
-        const score = (strike ? 0 : 1000) + w * 10 + path.length;
+        const speared = prey !== lair && lair && lair.alive && dist(t, lair) <= LAIR_SPEAR_RANGE ? 25 : 0;   // keep clear of the lair's spears
+        const score = (strike ? 0 : 1000) + w * 10 + path.length + speared;
         if (!best || score < best.score) best = { score, path, w, strike };
       });
       if (!best || (!best.strike && best.w >= here)) { u.done = true; continue; }
@@ -3389,6 +3481,11 @@
       stock.food += entry.n; got.push(['food', entry.n]); pulse('food', 'bump');
       floatAt(posOf(f.x, f.z), `+${entry.n} Food`, RES_COLOR.food);
       entry.notes.push({ cls: 'split', text: `${ripe.length} plot${ripe.length > 1 ? 's' : ''} harvested.` });
+      if (Math.random() < FARM_SEED_CHANCE) {   // the harvest sometimes leaves seed for the next planting
+        items.seed++;
+        floatAt(posOf(f.x, f.z), '+1 Wheat seed', '#c8e38a', 1.45, 350);
+        entry.notes.push({ cls: 'ev', text: 'Saved 1 wheat seed from the harvest.' });
+      }
     } else entry.skip = true;
     if (growing) entry.notes.push({ cls: 'dim', text: `${growing} plot${growing > 1 ? 's' : ''} still growing.` });
     entry.notes.push({ cls: 'dim', text: `${FARM_SLOTS - f.crops.length} plot${FARM_SLOTS - f.crops.length === 1 ? '' : 's'} free. Seeds in store: ${items.seed}.` });
@@ -3631,7 +3728,7 @@
     $('build').hidden = !placing;
     $('build').textContent = placing && placing.count ? 'Done building' : placing && ['lightning', 'landmine'].includes(placing.kind) ? 'Cancel' : 'Cancel build';
     if (popTile) renderPopup();
-    $('skip').disabled = !selected || busy;
+    $('skip').disabled = !selected || busy || selected.done;
     $('skipLbl').textContent = selected && selected.moved ? 'Done' : 'Hold';
     $('undo').disabled = !moving || !undoStack.length;
     schedulePush();
@@ -3691,7 +3788,7 @@
     const ty = TYPES[t.type];
     if (!ty.res) return {
       lairland: 'Lair grounds · bones of those who came too close',
-      lair: lair ? `Bandit lair · ${lair.hp}/${LAIR_HP} HP · sends out a guard every ${LAIR_EVERY} turns` : 'Bandit lair',
+      lair: lair ? `Bandit lair · ${lair.hp}/${LAIR_HP} HP · sends out a guard every ${LAIR_EVERY} turns and throws spears within ${LAIR_SPEAR_RANGE} hexes` : 'Bandit lair',
       base: players[t.owner] ? `${t.owner === cp ? 'Your' : players[t.owner].name + "'s"} ${STAGES[players[t.owner].stage].name.toLowerCase()} · ${players[t.owner].baseHp}/${STAGES[players[t.owner].stage].hp} HP` : 'Abandoned base',
       farm: t.crops ? `${t.owner === cp ? 'Your' : (players[t.owner] ? players[t.owner].name + "'s" : 'A')} farm · ${t.crops.length}/${FARM_SLOTS} plots planted` : 'Farm',
       smith: `${t.owner === cp ? 'Your' : (players[t.owner] ? players[t.owner].name + "'s" : 'A')} blacksmith`,
@@ -3761,8 +3858,8 @@
     if (u && u.owner !== cp && selected && targets.includes(u)) return attack(selected, u);
     if (u && u.owner !== cp) return say(`${label(u)} belongs to ${players[u.owner].name}.${selected ? ' Get in range to attack it.' : ''}`);
     if (u && !u.done) return select(u, false);
-    if (u && u.done) say(`${label(u)} has already acted this turn.`);
-    else if (selected) say(t.type === 'water' ? 'Units can only cross the river at a bridge.' : selected.moved ? `${label(selected)} has already moved. Attack or press Done.` : `${label(selected)} can't reach that tile this turn.`);
+    if (u && u.done) { select(u, false); return say(`${label(u)} has already acted this turn, but you can still give it items from the inventory.`); }
+    if (selected) say(t.type === 'water' ? 'Units can only cross the river at a bridge.' : selected.moved ? `${label(selected)} has already moved. Attack or press Done.` : `${label(selected)} can't reach that tile this turn.`);
   }
 
   function pan(dx, dy) {

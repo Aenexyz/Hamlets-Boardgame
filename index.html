@@ -2526,7 +2526,7 @@
         idx: pl.idx, faction: pl.faction, ai: pl.ai, uid: pl.uid || null, nick: pl.nick || null,
         stock: pl.stock, items: pl.items, found: pl.found, merchant: pl.merchant ? { left: pl.merchant.left, t: xy(pl.merchant.tile) } : null,
         stage: pl.stage, baseHp: pl.baseHp, farm: xy(pl.farm), smith: xy(pl.smith), wizard: xy(pl.wizard), barracks: xy(pl.barracks),
-        alive: pl.alive, cd: pl.cd, feast: pl.feast, feastWhy: pl.feastWhy || null, upkeeps: pl.upkeeps, heroDown: pl.heroDown, timeScroll: !!pl.timeScroll, lastUpkeep: pl.lastUpkeep || null,
+        alive: pl.alive, cd: pl.cd, feast: pl.feast, aiMarch: !!pl.aiMarch, feastWhy: pl.feastWhy || null, upkeeps: pl.upkeeps, heroDown: pl.heroDown, timeScroll: !!pl.timeScroll, lastUpkeep: pl.lastUpkeep || null,
       })),
       tiles: tiles.map(t => [t.type, t.amount, t.max, t.owner == null ? -1 : t.owner, t.crops ? t.crops.map(c => c.planted) : null]),
       units: units.map(u => ({ id: u.id, owner: u.owner, kind: u.kind, num: u.num, x: u.x, z: u.z, hp: u.hp, moved: u.moved, done: u.done, hungry: u.hungry,
@@ -2587,7 +2587,7 @@
   function applyPlayers(s) {
     s.players.forEach((d, i) => {
       const pl = players[i];
-      Object.assign(pl, { faction: d.faction, ai: d.ai, uid: d.uid, nick: d.nick, found: d.found || {}, alive: d.alive, cd: d.cd, feast: d.feast, feastWhy: d.feastWhy || null, upkeeps: d.upkeeps, heroDown: d.heroDown || null, timeScroll: d.timeScroll, lastUpkeep: d.lastUpkeep || null });
+      Object.assign(pl, { faction: d.faction, ai: d.ai, uid: d.uid, nick: d.nick, found: d.found || {}, alive: d.alive, cd: d.cd, feast: d.feast, aiMarch: !!d.aiMarch, feastWhy: d.feastWhy || null, upkeeps: d.upkeeps, heroDown: d.heroDown || null, timeScroll: d.timeScroll, lastUpkeep: d.lastUpkeep || null });
       Object.keys(pl.stock).forEach(k => delete pl.stock[k]); Object.assign(pl.stock, d.stock);
       Object.keys(pl.items).forEach(k => { pl.items[k] = (d.items && d.items[k]) || 0; });
       ['farm', 'smith', 'wizard', 'barracks'].forEach(k => { pl[k] = d[k] ? tileAt(d[k][0], d[k][1]) : null; });
@@ -2733,8 +2733,9 @@
   }
 
   // ---------- Scripted AI (Normal) ----------
-  // Priorities: 1) never starve: predict next upkeep and gather food first; 2) grow to Town and build a farm;
-  // 3) attack bandits that come close, peasants included; 4) gather what the next goal needs.
+  // Priorities: 1) never starve: predict next upkeep and gather food first; 2) build a farm, grow to Town,
+  // build barracks and train archers/footmen; 3) attack bandits that come close, peasants included;
+  // 4) once the army reaches AI_ARMY_SIZE, march it at the nearest rival unit; 5) gather what the next goal needs.
   let aiRunning = false, aiToken = 0;
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   async function idle() { while (busy && phase === 'move') await sleep(50); }
@@ -2752,10 +2753,16 @@
     return n;
   }
   const eatersNext = () => mine().filter(u => !UNITS[u.kind].noFood).length * (fac() === 'dwarf' && (P().upkeeps + 1) % 4 === 0 ? 2 : 1);
+  const AI_ARMY_SIZE = 5, AI_ARMY_MAX = 8;
+  const isSoldier = u => u.kind === 'footman' || u.kind === 'archer';
+  const aiArmy = () => mine().filter(isSoldier);
+  // next soldier to train: keep roughly 3 footmen to 2 archers
+  const aiNextSoldier = () => { const a = aiArmy(); return a.filter(u => u.kind === 'archer').length * 3 < a.filter(u => u.kind === 'footman').length * 2 ? 'archer' : 'footman'; };
   function aiGoalCost() {
     if (!P().farm) return BUILDINGS.farm.cost;                  // the farm first
     if (P().stage === 0) return STAGES[1].cost;                 // then grow to Town
-    if (!P().barracks) return BUILDINGS.barracks.cost;
+    if (!P().barracks) return BUILDINGS.barracks.cost;          // then barracks
+    if (aiArmy().length < AI_ARMY_SIZE) return costOf(aiNextSoldier());   // then an army
     if (P().stage === 1) return STAGES[2].cost;
     return STAGES[Math.min(3, P().stage + 1)].cost;
   }
@@ -2769,6 +2776,7 @@
       aiEconomy();
       aiAbility();
       await aiFightBandits(token);
+      await aiMarch(token);
       await aiHunt(token);
       await aiGather(token);
       await aiGuard(token);
@@ -2802,8 +2810,19 @@
       const spot = [...buildSpots].sort((a, b) => dist(a, BASE) - dist(b, BASE))[0];
       if (spot) build(spot); else cancelPlacing(false);
     }
-    if (P().barracks && canRecruit('footman') && stock.food - costOf('footman').food >= need + 4 && mine().filter(u => u.kind === 'footman').length < 2) recruit('footman');
-    if (P().stage === 1 && P().farm && !upgradeBlock() && stock.food - STAGES[2].cost.food >= need + 3) upgradeBase();
+    // train soldiers while food stays comfortable: up to the army size, then a few more when food is plentiful
+    if (P().barracks) {
+      for (let i = 0; i < 2; i++) {
+        const kind = aiNextSoldier(), size = aiArmy().length, eat = eatersNext();
+        const spare = stock.food - costOf(kind).food - (eat + 1) * (size < AI_ARMY_SIZE ? 2 : 3);
+        if (size >= AI_ARMY_MAX || spare < 0 || !canRecruit(kind)) break;
+        recruit(kind);
+      }
+    }
+    if (aiArmy().length >= AI_ARMY_SIZE) P().aiMarch = true;   // the army is ready: go to war
+    else if (aiArmy().length < 2) P().aiMarch = false;          // too few left: rebuild at home first
+    // City comes after the army is raised
+    if (P().stage === 1 && P().farm && P().barracks && P().aiMarch && !upgradeBlock() && stock.food - STAGES[2].cost.food >= need + 3) upgradeBase();
   }
 
   function aiAbility() {
@@ -2878,7 +2897,7 @@
       if (foodPlanned < foodTarget) want = 'food';
       else {
         const rs = ['food', 'wood', 'stone', 'gold'].filter(r => deficit(r) > 0).sort((a, b) => deficit(b) - deficit(a));
-        want = rs[0] || 'wood';
+        want = rs[0] || (P().barracks && aiArmy().length < AI_ARMY_SIZE ? 'food' : 'wood');   // soldiers are paid for mostly in food
       }
       // keep heading to an earlier destination while it still serves a need, instead of changing course every turn
       const g0 = u.aiGoal;
@@ -2950,6 +2969,59 @@
       await idle(); await sleep(150);
       if (!aiStillValid(token)) return;
       if ((bandits.includes(prey) || units.includes(prey)) && canReach(u, prey) && !u.done && strikeAt(prey)) { attack(u, strikeAt(prey)); await idle(); await sleep(220); }
+      u.done = true;
+    }
+  }
+
+  // walking distance to a tile across the whole board (rivers and walls make straight-line distance misleading)
+  function walkDist(goal) {
+    const start = tileAt(goal.x, goal.z), d = new Map([[start, 0]]);
+    let frontier = [start];
+    while (frontier.length) {
+      const next = [];
+      for (const t of frontier) for (const n of neighbors(t)) {
+        if (d.has(n) || !walkable(n) || wallBetween(t, n)) continue;
+        d.set(n, d.get(t) + 1); next.push(n);
+      }
+      frontier = next;
+    }
+    return d;
+  }
+  // the army marches on the nearest rival unit (or a rival base if no units are left) and attacks it
+  async function aiMarch(token) {
+    if (!P().aiMarch) return;
+    const rivals = () => units.filter(e => e.owner !== cp && players[e.owner] && players[e.owner].alive);
+    const soldiers = mine().filter(u => !u.done && !u.moved && isSoldier(u))
+      .sort((a, b) => (a.kind === 'footman' ? 0 : 1) - (b.kind === 'footman' ? 0 : 1));   // footmen lead
+    for (const u of soldiers) {
+      if (!aiStillValid(token)) return;
+      if (u.hungry) continue;
+      const foes = rivals();
+      let prey = foes.sort((a, b) => a.hp - b.hp + (dist(a, u) - dist(b, u)) * 2)[0];   // nearest, weak ones first
+      if (prey && dist(prey, u) > 12) prey = foes.sort((a, b) => dist(a, u) - dist(b, u))[0];
+      if (!prey) {
+        prey = players.filter(pl => pl.idx !== cp && pl.alive && pl.baseObj).map(pl => pl.baseObj).sort((a, b) => dist(a, u) - dist(b, u))[0];
+        if (!prey) return;
+      }
+      const pick = () => { const l = inRange(u); if (l.includes(prey)) return prey; return l.find(e => units.includes(e) && e.owner !== cp) || l.find(e => e.isBase) || null; };
+      let tgt = pick();
+      if (tgt) { attack(u, tgt); await idle(); await sleep(220); continue; }
+      const reach = reachable(u), wd = walkDist(prey), far = 999;
+      const here = wd.has(tileAt(u.x, u.z)) ? wd.get(tileAt(u.x, u.z)) : far;
+      let best = null;
+      reach.forEach((path, t) => {
+        const d = dist(t, prey);
+        const strike = d >= 1 && d <= rangeOf(u) && !(rangeOf(u) === 1 && wallBetween(t, tileAt(prey.x, prey.z)));
+        const w = wd.has(t) ? wd.get(t) : far;
+        const score = (strike ? 0 : 1000) + w * 10 + path.length;
+        if (!best || score < best.score) best = { score, path, w, strike };
+      });
+      if (!best || (!best.strike && best.w >= here)) { u.done = true; continue; }
+      cam.goal.set(u.mesh.position.x, 0, u.mesh.position.z);
+      moveAlong(u, best.path);
+      await idle(); await sleep(150);
+      if (!aiStillValid(token)) return;
+      if (!u.done && (tgt = pick())) { attack(u, tgt); await idle(); await sleep(220); }
       u.done = true;
     }
   }

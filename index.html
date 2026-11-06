@@ -168,6 +168,25 @@
   .slip .note.ev { color: #f3e6c4; }
   .slip .note.ev::before { content: "★ "; color: var(--gold); }
   .slip .note.bad { color: var(--danger); }
+  /* turn events: a glowing notice at the top of the report (gold = good news, sharp red = bad news) */
+  .event-note { border-radius: 10px; padding: 12px 14px; margin: 2px 0 12px; display: flex; flex-direction: column; gap: 6px; background: rgba(20, 16, 10, 0.55); }
+  .event-note.good { border: 1.5px solid #f2c14a; box-shadow: 0 0 6px rgba(242, 193, 74, 0.9), 0 0 18px rgba(242, 193, 74, 0.55), inset 0 0 12px rgba(242, 193, 74, 0.18); animation: evGlowGood 1.8s ease-in-out infinite; }
+  .event-note.bad { border: 1.5px solid #ff2a1f; box-shadow: 0 0 0 1px rgba(255, 42, 31, 0.6), 0 0 8px rgba(255, 42, 31, 1), inset 0 0 10px rgba(255, 42, 31, 0.22); animation: evGlowBad 0.9s steps(2, end) infinite; }
+  @keyframes evGlowGood { 50% { box-shadow: 0 0 10px rgba(242, 193, 74, 1), 0 0 28px rgba(242, 193, 74, 0.7), inset 0 0 14px rgba(242, 193, 74, 0.25); } }
+  @keyframes evGlowBad { 50% { box-shadow: 0 0 0 1px rgba(255, 42, 31, 0.9), 0 0 14px rgba(255, 42, 31, 1), inset 0 0 14px rgba(255, 42, 31, 0.3); } }
+  .event-note .ev-kicker { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 700; }
+  .event-note.good .ev-kicker { color: #f2c14a; }
+  .event-note.bad .ev-kicker { color: #ff5a4a; }
+  .event-note h3 { margin: 0; font-size: 18px; }
+  .event-note p { margin: 0; font-size: 14px; line-height: 1.4; }
+  .event-note .ev-choices { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+  .event-note .ev-done { font-size: 13.5px; color: #f3e6c4; }
+  #evToast { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 40; max-width: min(460px, calc(100vw - 32px)); pointer-events: none;
+    background: rgba(20, 16, 10, 0.92); border-radius: 10px; padding: 10px 14px; font-size: 14px; line-height: 1.35; color: #f3ece0; }
+  #evToast.good { border: 1.5px solid #f2c14a; box-shadow: 0 0 8px rgba(242, 193, 74, 0.9), 0 0 20px rgba(242, 193, 74, 0.5); }
+  #evToast.bad { border: 1.5px solid #ff2a1f; box-shadow: 0 0 0 1px rgba(255, 42, 31, 0.6), 0 0 10px rgba(255, 42, 31, 1); }
+  #evToast b { display: block; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 2px; }
+  #evToast.good b { color: #f2c14a; } #evToast.bad b { color: #ff5a4a; }
   .slip .note.dim { color: var(--muted); }
   .slip .note.split { color: var(--parch); font-variant-numeric: tabular-nums; }
   .slip .note.tool { color: var(--gold); font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -273,6 +292,7 @@
         <span><i class="sw" style="background:#c9b98a"></i>Riverbank → 0–4 food, plus river finds</span>
       </div>
       <p>On an island in the middle of the river sits a <b>bandit lair</b> (8 HP), ringed by bone-strewn grounds you can cross at your own risk. Its guards don't steal, but they hit anyone who comes close, and a new one comes out every 3 turns. The lair also hurls spears at up to 2 units within 2 hexes each turn, for 2 damage. Destroy it for its hoard. After that, a bandit tent with a single bandit pops up on a meadow within 6 hexes of the old lair every 10 player turns.</p>
+      <p><b>Turn events</b> strike every 4th turn of each player: a wandering peasant, a dwarf mason, a travelling merchant, a bountiful harvest, new wheat or forest, a pot of gold, or trouble such as a bandit tent or a fire.</p>
       <p>Bandits have 3 HP. When killed they drop gold, a worn-out tool, a demon drug or a shield scroll, plus 1–6 wheat seeds. A farm harvest saves a seed half the time. Build a barracks to train footmen (3 HP, hit for 2) and archers (shoot 3 tiles away).</p>
       </details>
       <p style="color:var(--muted);font-size:13.5px">Drag to rotate. Right-drag, two fingers or WASD to pan. Scroll or pinch to zoom.</p>
@@ -300,11 +320,13 @@
   <div class="overlay" id="report" hidden>
     <div class="panel card" role="dialog" aria-labelledby="reportTitle">
       <h2 id="reportTitle">Turn 1 harvest</h2>
+      <div id="reportEvent"></div>
       <div class="slips" id="slips"></div>
       <div class="report-total" id="reportTotal"></div>
       <button class="primary" id="reportGo" style="align-self:flex-start">Start moving <kbd>Enter</kbd></button>
     </div>
   </div>
+  <div id="evToast" hidden></div>
   <div class="overlay" id="over" hidden>
     <div class="panel card">
       <h2 id="overTitle">The settlement has fallen</h2>
@@ -526,6 +548,8 @@
   const TENT_EVERY = 10;         // after the lair falls, a bandit tent pops up every 10 player turns...
   const TENT_RANGE = 6;          // ...on a meadow within 6 hexes of the old lair
   const FARM_SEED_CHANCE = 0.5;
+  const EVENT_EVERY = 4;         // a turn event happens on every 4th turn of each player (never the first)
+  const POT_GOLD = [3, 8], CAMP_LOOT = { food: 3, wood: 2, stone: 1 };   // pot of gold; bandit tent drops a supply crate
   const LAIR_EVERY = 3;          // a new guard comes out every 3 turns...
   const LAIR_MAX_GUARDS = 3;     // ...while fewer than 3 guard it
   // Your side wears red; bandits wear black and purple.
@@ -1185,6 +1209,7 @@
   let tiles, units, bandits, stock, items, turn, phase, selected, busy, nextId, placing, barracks, lair, walls = new Map(), ghosts = [], mines = new Map(), reportResume = false;
   let players = [], cp = 0, playerCount = 1;
   let tentClock = 0;   // player turns since the last bandit tent (counts only once the lair has fallen)
+  let curEvent = null, pots = [], fires = [], lastEvent = null;   // this turn's event, pots of gold on the map, burning tiles
   let timers = [], undoStack = [], moves = new Map(), targets = [], buildSpots = new Set(), turnLog = [];
   // odd-r offset coords -> cube coords for distance
   const cube = t => { const q = t.x - (t.z - (t.z & 1)) / 2; return [q, t.z, -q - t.z]; };
@@ -1215,6 +1240,7 @@
     return c;
   };
   const structCost = kind => {
+    if (kind === 'wall' && P() && P().freeWalls > 0) return {};   // the dwarf traveler's sections are free
     const c = { ...STRUCT[kind].cost };
     if (kind === 'bridge' && fac() === 'mer') Object.keys(c).forEach(r => { c[r] = Math.ceil(c[r] / 2); });
     return c;
@@ -1312,7 +1338,7 @@
     timers.forEach(clearTimeout); timers = []; tweens.length = 0;
     while (world.children.length) { const c = world.children[0]; world.remove(c); if (c.geometry && c.geometry !== tileGeo && c.geometry !== waterGeo) c.geometry.dispose(); }
     movingUnit = null; closePopup(); aiToken++; aiRunning = false;
-    tiles = []; units = []; bandits = []; selected = null; busy = false; turn = 1; nextId = 1; tentClock = 0; placing = false; barracks = null; lair = null; walls = new Map(); ghosts = []; mines = new Map(); reportResume = false;
+    tiles = []; units = []; bandits = []; selected = null; busy = false; turn = 1; nextId = 1; tentClock = 0; curEvent = null; pots = []; fires = []; lastEvent = null; placing = false; barracks = null; lair = null; walls = new Map(); ghosts = []; mines = new Map(); reportResume = false;
     undoStack = []; moves = new Map(); targets = []; buildSpots = new Set();
     setCurrent(0);
     const types = generateTypes();
@@ -1437,7 +1463,7 @@
   }
   const raiders = () => bandits.filter(b => !b.guard);
   const guards = () => bandits.filter(b => b.guard);
-  const banditName = b => b.guard ? 'lair guard' : b.tent ? 'tent bandit' : 'bandit';
+  const banditName = b => b.guard ? 'lair guard' : b.camp ? 'bandit tent' : b.tent ? 'tent bandit' : 'bandit';
 
   // ---------- Bandit tents (after the lair falls) ----------
   const tentCanvas = new THREE.MeshStandardMaterial({ color: 0x8a5a3c, roughness: 0.9 });
@@ -1582,6 +1608,8 @@
 
   function startTurn() {
     phase = 'gather'; busy = true; selected = null; moves = new Map(); targets = []; refreshMarkers(); updateHUD();
+    burnOut();
+    curEvent = turn > 1 && turn % EVENT_EVERY === 0 ? rollTurnEvent() : null;
     const { report, got } = gatherAll(false);
     tickTotems(report);
     // AI bonus: every 3rd turn an AI settlement receives extra supplies, to make it tougher to beat
@@ -1594,6 +1622,9 @@
       pulse('wood', 'bump'); pulse('stone', 'bump');
     }
     if (turn > 1) harvestFarm(report, got);
+    P().bounty = false;
+    if (curEvent && P().ai) aiResolveEvent(curEvent);
+    if (curEvent && (P().ai || !isLocalTurn())) showToast(curEvent);
     const lu = P().lastUpkeep;
     if (lu && (lu.starved.length || lu.hungry.length)) {
       const notes = [];
@@ -1617,6 +1648,7 @@
       const entry = { who: label(u), type: t.type, name: ty.name, res: ty.res, n: 0, notes: [] };
       report.push(entry);
       if (u.fought) { u.fought = false; entry.skip = true; entry.notes.push({ cls: 'dim', text: 'Fought last turn instead of gathering.' }); return; }
+      if (t.burn) { entry.skip = true; entry.notes.push({ cls: 'bad', text: 'This tile is on fire. Nothing can be gathered until it burns out.' }); floatAt(u.mesh.position, 'On fire!', '#ff7a3a'); return; }
       if (!ty.res || t.amount <= 0) { entry.skip = true; entry.notes.push({ cls: 'dim', text: 'Nothing to gather on this tile.' }); return; }
       if (u.hungry) { entry.skip = true; entry.notes.push({ cls: 'bad', text: 'Too hungry to work. Feed them at upkeep.' }); floatAt(u.mesh.position, 'Too hungry to work', '#e0735a'); return; }
       if (ambushOK && raiders().length < MAX_BANDITS && Math.random() < BANDIT_CHANCE + (t.type === 'bank' ? BANK_AMBUSH : 0)) {
@@ -1661,9 +1693,11 @@
         entry.notes.push({ cls: 'tool', text: `Silver axe: +${sx} ${rl}${sx === 0 ? ' (no luck)' : ''}.` });
         if (sx > 0) floatAt(u.mesh.position, `Silver axe: +${sx}`, '#e6eef5', 1.3, 350);
       }
+      const gain = P().bounty && !bonusPass ? n * 2 : n;   // bountiful harvest doubles what comes in
+      if (gain !== n) { entry.n = gain; entry.notes.push({ cls: 'ev', text: `Bountiful harvest: doubled to +${gain} ${rl}.` }); }
       if (n > 0) {
-        stock[ty.res] += n; t.amount -= n; got.push([ty.res, n]);
-        floatAt(u.mesh.position, `+${n} ${RES_LABEL[ty.res]}`, RES_COLOR[ty.res]);
+        stock[ty.res] += gain; t.amount -= n; got.push([ty.res, gain]);
+        floatAt(u.mesh.position, `+${gain} ${RES_LABEL[ty.res]}`, RES_COLOR[ty.res]);
         pulse(ty.res, 'bump');
       } else {
         floatAt(u.mesh.position, 'Found nothing', '#a59d8b');
@@ -1722,10 +1756,11 @@
 
   function showReport(report, got) {
     if (P().ai) { reportResume = false; return startMove(); }   // the AI reads its own harvest
-    if (!reportResume && (turn === 1 || !report.length)) return startMove();
+    if (!reportResume && !curEvent && (turn === 1 || !report.length)) return startMove();
     if (reportResume && !report.length) { reportResume = false; phase = 'move'; busy = false; selectNext(false); return updateHUD(); }
     $('reportTitle').textContent = players.length > 1 ? `${P().name} · turn ${turn} harvest` : `Turn ${turn} harvest`;
     $('reportTitle').style.color = players.length > 1 ? P().css : '';
+    renderEventNote();
     const hex = n => '#' + n.toString(16).padStart(6, '0');
     const ink = n => { const r = n >> 16, g = (n >> 8) & 255, b = n & 255; return (0.3 * r + 0.59 * g + 0.11 * b) > 120 ? '#1b1f26' : '#f3ece0'; };
     const esc = t => t.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
@@ -1750,6 +1785,10 @@
   }
   function closeReport() {
     if ($('report').hidden) return;
+    if (curEvent && curEvent.choices && !curEvent.done) {   // a choice is waiting
+      const n = document.querySelector('.event-note'); if (n) { n.style.animation = 'none'; void n.offsetWidth; n.style.animation = ''; }
+      return;
+    }
     $('report').hidden = true;
     if (reportResume) { reportResume = false; phase = 'move'; busy = false; selectNext(false); return updateHUD(); }
     startMove();
@@ -1842,6 +1881,7 @@
         }
         if (i + 1 < path.length) return step(i + 1);
         u.x = t.x; u.z = t.z; u.moved = true; busy = false; movingUnit = null;
+        claimPots(u);
         if (atkOf(u) > 0 && inRange(u).length) {
           select(u, false);
           say(`${label(u)} has a target in reach. Attack it, or press Done.`);
@@ -1892,6 +1932,13 @@
     bandits.splice(bandits.indexOf(b), 1);
     removeTent(b);
     const pos = b.mesh.position.clone();
+    if (b.camp) {   // a bandit tent: no bandit inside, just the supply crate they were guarding
+      world.remove(b.mesh);
+      refund(CAMP_LOOT); Object.keys(CAMP_LOOT).forEach(r => pulse(r, 'bump'));
+      floatAt(pos, `Bandit tent destroyed! Supply crate: ${costText(CAMP_LOOT)}`, '#f3e6c4', 1.2, 300);
+      say(`${label(by)} tore down the bandit tent and found a supply crate: ${costText(CAMP_LOOT)}.`);
+      return updateHUD();
+    }
     tween(350, (k, e) => { const s = 1 - e * 0.99; b.mesh.scale.set(s, s, s); b.mesh.rotation.y += 0.25; }, () => world.remove(b.mesh));
     const drop = rollDrop();
     const seeds = seedDrop();
@@ -2060,7 +2107,7 @@
     }
     const w = wallOf(tileAt(b.x, b.z), tileAt(victim.x, victim.z));
     lunge(b.mesh, w ? w.mesh.position : victim.mesh.position, () => {
-      if (w && walls.has(w.key)) hurtWall(w, BANDIT.atk); else hurtUnit(victim, BANDIT.atk);
+      if (w && walls.has(w.key)) hurtWall(w, BANDIT.atk); else hurtUnit(victim, BANDIT.atk, b.camp ? 'The bandit tent' : b.guard ? 'A lair guard' : 'A bandit');
       updateHUD(); steal();
     });
   }
@@ -2140,11 +2187,9 @@
   function spawnTile(from) {
     const home = from === 'base' ? tileAt(BASE.x, BASE.z) : barracks;
     if (!home) return null;
-    if (!occupied(home)) return home;
-    for (const t of neighbors(home)) {
-      if (walkable(t) && !occupied(t)) return t;
-    }
-    return null;
+    // new units step out onto a free hex next to the base or barracks, never onto the building itself
+    const free = neighbors(home).filter(t => walkable(t) && !occupied(t) && !banditAt(t.x, t.z) && !wallBetween(home, t));
+    return free.length ? pickOne(free) : null;
   }
   function canRecruit(kind) {
     const spec = UNITS[kind];
@@ -2266,16 +2311,17 @@
   }
   function clearGhosts() { ghosts.forEach(g => world.remove(g)); ghosts = []; }
   function placeWall(ghost) {
-    const p = placing, cost = STRUCT.wall.cost;
+    const p = placing, cost = structCost('wall'), free = P().freeWalls > 0;
     if (!affordable(cost)) return say(`Not enough stone. ${shortfall(cost).join(', ')}.`);
     pay(cost);
+    if (free) P().freeWalls--;
     const { a, b } = ghost.userData.edge;
     const w = addWall(a, b);
     world.remove(ghost); ghosts = ghosts.filter(g => g !== ghost);
-    undoStack.push({ type: 'wall', w, cost: { ...cost } });
+    undoStack.push({ type: 'wall', w, cost: { ...cost }, free });
     p.count++;
-    if (!ghosts.length || !affordable(cost)) return cancelPlacing(true);
-    say(`Wall built (${p.count} so far). Click another edge, or press Done building.`);
+    if (!ghosts.length || !affordable(structCost('wall'))) return cancelPlacing(true);
+    say(`Wall built (${p.count} so far)${free ? `, free from the dwarf${P().freeWalls ? ` (${P().freeWalls} free left)` : ''}` : ''}. Click another edge, or press Done building.`);
     refreshMarkers(); updateHUD();
   }
   function build(t) {
@@ -2647,13 +2693,15 @@
         idx: pl.idx, faction: pl.faction, ai: pl.ai, uid: pl.uid || null, nick: pl.nick || null,
         stock: pl.stock, items: pl.items, found: pl.found, merchant: pl.merchant ? { left: pl.merchant.left, t: xy(pl.merchant.tile) } : null,
         stage: pl.stage, baseHp: pl.baseHp, farm: xy(pl.farm), smith: xy(pl.smith), wizard: xy(pl.wizard), barracks: xy(pl.barracks),
-        alive: pl.alive, cd: pl.cd, feast: pl.feast, aiMarch: !!pl.aiMarch, feastWhy: pl.feastWhy || null, upkeeps: pl.upkeeps, heroDown: pl.heroDown, timeScroll: !!pl.timeScroll, lastUpkeep: pl.lastUpkeep || null,
+        alive: pl.alive, cd: pl.cd, feast: pl.feast, freeWalls: pl.freeWalls || 0, aiMarch: !!pl.aiMarch, feastWhy: pl.feastWhy || null, upkeeps: pl.upkeeps, heroDown: pl.heroDown, timeScroll: !!pl.timeScroll, lastUpkeep: pl.lastUpkeep || null,
       })),
-      tiles: tiles.map(t => [t.type, t.amount, t.max, t.owner == null ? -1 : t.owner, t.crops ? t.crops.map(c => c.planted) : null]),
+      tiles: tiles.map(t => [t.type, t.amount, t.max, t.owner == null ? -1 : t.owner, t.crops ? t.crops.map(c => c.planted) : null, t.burn ? [t.burn.by, t.burn.at] : 0]),
       units: units.map(u => ({ id: u.id, owner: u.owner, kind: u.kind, num: u.num, x: u.x, z: u.z, hp: u.hp, moved: u.moved, done: u.done, hungry: u.hungry,
         tools: [...u.tools], silver: !!u.silver, sword: !!u.sword, wornSword: u.wornSword || 0, armor: !!u.armor, scope: !!u.scope, horse: !!u.horse,
         bubble: !!u.bubble, power: u.power || 0, drug: !!u.drug, fought: !!u.fought, extraMoves: u.extraMoves || 0, life: u.life || 0, rot: u.mesh.rotation.y })),
-      bandits: bandits.map(b => ({ id: b.id, x: b.x, z: b.z, hp: b.hp, guard: b.guard, target: b.target, tent: !!b.tent })),
+      bandits: bandits.map(b => ({ id: b.id, x: b.x, z: b.z, hp: b.hp, guard: b.guard, target: b.target, tent: !!b.tent, camp: !!b.camp })),
+      pots: pots.map(q => [q.x, q.z]),
+      event: lastEvent,
       tentClock,
       lair: lair ? { hp: lair.hp, alive: lair.alive } : null,
       walls: [...walls.values()].map(w => ({ a: xy(w.a), b: xy(w.b), hp: w.hp })),
@@ -2694,7 +2742,7 @@
   function banditFromData(d) {
     const b = addBandit(d.x, d.z, d.guard, d.target);
     b.id = d.id; b.hp = d.hp; b.mesh.traverse(o => { o.userData.banditId = b.id; });
-    if (d.tent) attachTent(b);
+    if (d.camp) makeCamp(b); else if (d.tent) attachTent(b);
     b.mesh.scale.set(1, 1, 1);
     const bar = b.mesh.userData.bar; bar.userData.shown = b.hp / BANDIT.hp; bar.userData.fill.scale.x = Math.max(0.0001, BAR_W * b.hp / BANDIT.hp);
     return b;
@@ -2710,7 +2758,7 @@
   function applyPlayers(s) {
     s.players.forEach((d, i) => {
       const pl = players[i];
-      Object.assign(pl, { faction: d.faction, ai: d.ai, uid: d.uid, nick: d.nick, found: d.found || {}, alive: d.alive, cd: d.cd, feast: d.feast, aiMarch: !!d.aiMarch, feastWhy: d.feastWhy || null, upkeeps: d.upkeeps, heroDown: d.heroDown || null, timeScroll: d.timeScroll, lastUpkeep: d.lastUpkeep || null });
+      Object.assign(pl, { faction: d.faction, ai: d.ai, uid: d.uid, nick: d.nick, found: d.found || {}, alive: d.alive, cd: d.cd, feast: d.feast, freeWalls: d.freeWalls || 0, aiMarch: !!d.aiMarch, feastWhy: d.feastWhy || null, upkeeps: d.upkeeps, heroDown: d.heroDown || null, timeScroll: d.timeScroll, lastUpkeep: d.lastUpkeep || null });
       Object.keys(pl.stock).forEach(k => delete pl.stock[k]); Object.assign(pl.stock, d.stock);
       Object.keys(pl.items).forEach(k => { pl.items[k] = (d.items && d.items[k]) || 0; });
       ['farm', 'smith', 'wizard', 'barracks'].forEach(k => { pl[k] = d[k] ? tileAt(d[k][0], d[k][1]) : null; });
@@ -2738,7 +2786,7 @@
     timers.forEach(clearTimeout); timers = []; tweens.length = 0;
     while (world.children.length) { const c = world.children[0]; world.remove(c); if (c.geometry && c.geometry !== tileGeo && c.geometry !== waterGeo) c.geometry.dispose(); }
     movingUnit = null; closePopup(); aiToken++; aiRunning = false;
-    tiles = []; units = []; bandits = []; selected = null; busy = false; placing = false; lair = null; walls = new Map(); ghosts = []; mines = new Map(); reportResume = false;
+    tiles = []; units = []; bandits = []; selected = null; busy = false; placing = false; lair = null; pots = []; fires = []; walls = new Map(); ghosts = []; mines = new Map(); reportResume = false;
     undoStack = []; moves = new Map(); targets = []; buildSpots = new Set();
     s.tiles.forEach((d, i) => {
       const x = i % N, z = Math.floor(i / N), ty = d[0];
@@ -2841,6 +2889,7 @@
   function finishApply(s) {
     online.applying = true;
     turn = s.turn; nextId = Math.max(nextId, s.nextId); phase = s.phase; tentClock = s.tentClock || 0;
+    syncWorldExtras(s);
     setCurrent(s.cp);
     if (!isLocalTurn()) { selected = null; moves = new Map(); targets = []; busy = true; }
     say(s.log || '');
@@ -2899,6 +2948,7 @@
       aiEconomy();
       aiAbility();
       await aiFightBandits(token);
+      await aiPots(token);
       await aiMarch(token);
       await aiHunt(token);
       await aiGather(token);
@@ -3033,14 +3083,14 @@
       const types = RES_TILES[want];
       const here = tileAt(u.x, u.z);
       // stay put if already on a matching tile with resources left
-      if (types.includes(here.type) && here.amount > 0 && !danger(here) && !claimed.has(here)) {
+      if (types.includes(here.type) && here.amount > 0 && !here.burn && !danger(here) && !claimed.has(here)) {
         claimed.add(here); planned[want] += expectedFrom(here.type, u);
         u.aiGoal = here; u.aiWant = want;
         if (want === 'food') foodPlanned += willWork(u) ? expectedFrom(here.type, u) : 0;
         u.done = true;
         continue;
       }
-      const targets2 = tiles.filter(t => types.includes(t.type) && t.amount > 0 && !claimed.has(t) && !danger(t) && (!occupied(t) || (t.x === u.x && t.z === u.z)));
+      const targets2 = tiles.filter(t => types.includes(t.type) && t.amount > 0 && !t.burn && !claimed.has(t) && !danger(t) && (!occupied(t) || (t.x === u.x && t.z === u.z)));
       if (!targets2.length) { u.done = true; continue; }
       const keep = g0 && u.aiWant === want && targets2.includes(g0);
       const goal = keep ? g0 : targets2.sort((a, b) => (dist(a, u) - dist(b, u)) || (expectedFrom(b.type, u) - expectedFrom(a.type, u)))[0];
@@ -3169,6 +3219,255 @@
       reachable(u).forEach((path, t) => { const d = dist(t, BASE); if (!best || d < best.d) best = { d, path }; });
       if (best && best.d < dist(u, BASE)) { moveAlong(u, best.path); await idle(); await sleep(120); }
       u.done = true;
+    }
+  }
+
+  // ---------- Turn events (every 4th turn of each player) ----------
+  const inReach = (r, lo = 1) => tiles.filter(t => dist(t, BASE) >= lo && dist(t, BASE) <= r);
+  const meadowsNear = r => inReach(r).filter(t => t.type === 'meadow' && !banditAt(t.x, t.z) && !pots.some(q => q.x === t.x && q.z === t.z));
+  const campSpots = () => inReach(6, 2).filter(t => t.type === 'meadow' && walkable(t) && !occupied(t) && !banditAt(t.x, t.z) && !pots.some(q => q.x === t.x && q.z === t.z));
+  const burnable = type => inReach(6, 0).filter(t => t.type === type && t.amount > 0 && !t.burn);
+  const POT_GROUND = ['meadow', 'forest', 'field', 'quarry', 'mine', 'bank', 'shore', 'lairland'];
+  const potSpots = () => inReach(6, 2).filter(t => POT_GROUND.includes(t.type) && walkable(t) && !occupied(t) && !banditAt(t.x, t.z) && !pots.some(q => q.x === t.x && q.z === t.z));
+  function growTile(t, type) {
+    t.amount = randInt(...TYPES[type].range);
+    setTileType(t, type);
+    if (t.props) { t.props.scale.set(0.01, 0.01, 0.01); tween(700, (k, e) => { const v = 0.01 + 0.99 * e; t.props.scale.set(v, v, v); }); }
+  }
+  const TURN_EVENTS = [
+    { key: 'peasant', good: true, title: 'Wandering peasant', start(ev) {
+        ev.text = 'A peasant wandered in from the wilds. Take them into your hamlet, or trade their pack for 5 food.';
+        ev.choices = [
+          { label: 'Take them in', why: () => mine().length >= MAX_UNITS ? 'No room for more units.' : !spawnTile('base') ? 'No free hex next to your base.' : null,
+            run: () => { const t = spawnTile('base'); const u = addUnit('peasant', t.x, t.z); u.mesh.scale.set(0.01, 0.01, 0.01); tween(400, (k, e) => { const v = 0.01 + 0.99 * e; u.mesh.scale.set(v, v, v); }); return `${label(u)} joined your hamlet. They eat at upkeep.`; } },
+          { label: 'Take 5 food', run: () => { stock.food += 5; pulse('food', 'bump'); return 'You traded their pack for 5 food.'; } },
+        ];
+      } },
+    { key: 'dwarf', good: true, title: 'Dwarf traveler', start(ev) {
+        ev.text = 'A travelling dwarf mason offers to build 3 wall sections for you, in exchange for 3 food.';
+        ev.choices = [
+          { label: 'Pay 3 food', why: () => stock.food < 3 ? 'You need 3 food.' : null,
+            run: () => { stock.food -= 3; pulse('food', 'drain'); P().freeWalls = (P().freeWalls || 0) + 3; return 'Paid 3 food. Your next 3 wall sections are free: open your base and choose Wall to place them.'; } },
+          { label: 'Send him on his way', run: () => 'The dwarf shrugs and walks on.' },
+        ];
+      } },
+    { key: 'merchant', good: true, title: 'Traveling merchant', can: () => !P().merchant, start(ev) {
+        P().merchant = { left: MERCHANT_TRADES, tile: tileAt(BASE.x, BASE.z) };
+        ev.at = tileAt(BASE.x, BASE.z);
+        ev.text = `A merchant's cart rolled up to your base. Press Merchant during your moves to trade (up to ${MERCHANT_TRADES} trades, this turn only).`;
+      } },
+    { key: 'bounty', good: true, title: 'Bountiful harvest', start(ev) {
+        P().bounty = true;
+        ev.text = 'Everything your units gather this turn is doubled, and so is your farm harvest.';
+      } },
+    { key: 'flourish', good: true, title: 'Flourish', can: () => meadowsNear(4).length > 0, start(ev) {
+        const t = pickOne(meadowsNear(4)); growTile(t, 'field'); ev.at = t;
+        ev.text = 'A new wheat field sprang up on a meadow near your base.';
+      } },
+    { key: 'sprout', good: true, title: 'Sprout', can: () => meadowsNear(4).length > 0, start(ev) {
+        const t = pickOne(meadowsNear(4)); growTile(t, 'forest'); ev.at = t;
+        ev.text = 'A new forest grew on a meadow near your base.';
+      } },
+    { key: 'camp', good: false, title: 'Bandit tent', can: () => campSpots().length > 0, start(ev) {
+        const t = pickOne(campSpots()); const b = addBandit(t.x, t.z, false, null); makeCamp(b); ev.at = t;
+        ev.text = `Bandits pitched a tent near your base. Each turn it hits a unit next to it for ${BANDIT.atk}. Destroy it (${BANDIT.hp} HP) for a supply crate.`;
+      } },
+    { key: 'fireForest', good: false, title: 'Burning forest', can: () => burnable('forest').length > 0, start(ev) {
+        const t = pickOne(burnable('forest')); ignite(t); ev.at = t;
+        ev.text = "A forest near your base caught fire. It can't be gathered this turn, and it burns down to meadow.";
+      } },
+    { key: 'fireField', good: false, title: 'Burning wheat field', can: () => burnable('field').length > 0, start(ev) {
+        const t = pickOne(burnable('field')); ignite(t); ev.at = t;
+        ev.text = "A wheat field near your base caught fire. It can't be gathered this turn, and it burns down to meadow.";
+      } },
+    { key: 'pot', good: true, title: 'Pot of gold', can: () => potSpots().length > 0, start(ev) {
+        const t = pickOne(potSpots()); addPot(t.x, t.z); ev.at = t;
+        ev.text = `A pot of gold appeared near your base. Move any unit onto or next to it to claim ${POT_GOLD[0]}–${POT_GOLD[1]} gold. Rivals can grab it too.`;
+      } },
+  ];
+  function rollTurnEvent() {
+    const def = pickOne(TURN_EVENTS.filter(e => !e.can || e.can()));
+    const ev = { key: def.key, good: def.good, title: def.title, text: '', choices: null, done: false, who: P().name };
+    def.start(ev);
+    if (ev.at) floatAt(posOf(ev.at.x, ev.at.z), ev.title, ev.good ? '#f2c14a' : '#ff5a4a', 1.3, 300);
+    lastEvent = { id: `${turn}:${cp}`, who: ev.who, title: ev.title, text: ev.text, good: ev.good };
+    return ev;
+  }
+  function chooseEvent(i) {
+    const ev = curEvent;
+    if (!ev || !ev.choices || ev.done) return;
+    const c = ev.choices[i];
+    if (!c || (c.why && c.why())) return;
+    ev.result = c.run(); ev.done = true;
+    if (lastEvent) lastEvent.text = `${ev.text} ${ev.result}`;
+    renderEventNote(); refreshMarkers(); updateHUD();
+  }
+  function renderEventNote() {
+    const el = $('reportEvent'), ev = curEvent;
+    const waiting = !!(ev && ev.choices && !ev.done);
+    $('reportGo').disabled = waiting;
+    if (!ev) { el.innerHTML = ''; return; }
+    const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const btns = waiting ? `<div class="ev-choices">${ev.choices.map((c, i) => { const why = c.why && c.why(); return `<button class="${i === 0 && !why ? 'primary' : ''}" data-evc="${i}" ${why ? `disabled title="${esc(why)}"` : ''}>${esc(c.label)}${why ? ` · ${esc(why)}` : ''}</button>`; }).join('')}</div>` : '';
+    el.innerHTML = `<div class="event-note ${ev.good ? 'good' : 'bad'}" role="status">
+      <span class="ev-kicker">${ev.good ? 'Good news' : 'Bad news'} · turn event</span>
+      <h3>${esc(ev.title)}</h3><p>${esc(ev.text)}</p>${btns}${ev.result ? `<div class="ev-done">${esc(ev.result)}</div>` : ''}${waiting ? '<p style="font-size:12.5px;color:var(--muted)">Choose one to continue.</p>' : ''}</div>`;
+  }
+  let toastTimer = null, toastSeen = null;
+  function showToast(ev) {
+    const el = $('evToast');
+    el.className = ev.good ? 'good' : 'bad';
+    el.innerHTML = '';
+    const b = document.createElement('b'); b.textContent = `${ev.who} · ${ev.good ? 'Good news' : 'Bad news'}`;
+    el.append(b, document.createTextNode(`${ev.title}: ${ev.text}`));
+    el.hidden = false;
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, 6000);
+  }
+  function aiResolveEvent(ev) {
+    if (!ev.choices) return;
+    let pick = 1;
+    if (ev.key === 'peasant') pick = !ev.choices[0].why() && stock.food >= eatersNext() * 2 ? 0 : 1;
+    if (ev.key === 'dwarf') pick = !ev.choices[0].why() && stock.food - 3 >= eatersNext() + 2 ? 0 : 1;
+    chooseEvent(pick);
+    if (ev.key === 'dwarf' && pick === 0) autoWalls();
+  }
+  // the AI lets the dwarf put its free walls on the base's edges that face the middle of the map
+  function autoWalls() {
+    const home = tileAt(BASE.x, BASE.z);
+    const sides = neighbors(home).filter(n => !wallBetween(home, n) && !(home.type === 'water' && n.type === 'water')).sort((a, b) => dist(a, LAIR) - dist(b, LAIR));
+    for (const n of sides) { if (!(P().freeWalls > 0)) break; addWall(home, n); P().freeWalls--; }
+  }
+
+  // ----- burning tiles -----
+  const flameMats = [0xff3a1a, 0xff7a1a, 0xffd04a].map(c => new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.85, depthWrite: false }));
+  const flameGeo = new THREE.ConeGeometry(0.085, 0.32, 7); flameGeo.translate(0, 0.16, 0);
+  const emberGeo = new THREE.SphereGeometry(0.018, 5, 4);
+  function ignite(t) { t.burn = { by: cp, at: turn }; addFire(t); }
+  function addFire(t) {
+    const g = new THREE.Group();
+    const scorch = new THREE.Mesh(new THREE.CircleGeometry(0.42, 18), new THREE.MeshBasicMaterial({ color: 0x1d130c, transparent: true, opacity: 0.55, depthWrite: false }));
+    scorch.rotation.x = -Math.PI / 2; scorch.position.y = 0.01; g.add(scorch);
+    const flames = [], embers = [];
+    [[0, 0, 1.25], [0.2, 0.12, 0.9], [-0.18, 0.14, 1], [0.06, -0.2, 0.85], [-0.12, -0.13, 0.75]].forEach(([x, z, sc], i) => {
+      [0, 1, 2].forEach(layer => {
+        const f = new THREE.Mesh(flameGeo, flameMats[layer]);
+        f.position.set(x, 0.01, z); const k = sc * (1 - layer * 0.28); f.scale.set(k, k, k);
+        f.userData = { base: k, ph: Math.random() * 6.28, sp: 0.012 + Math.random() * 0.01 };
+        g.add(f); flames.push(f);
+      });
+    });
+    for (let i = 0; i < 8; i++) {
+      const e = new THREE.Mesh(emberGeo, new THREE.MeshBasicMaterial({ color: i % 2 ? 0xffb347 : 0xff5a1f, transparent: true, depthWrite: false }));
+      e.userData = { ph: Math.random(), x: (Math.random() - 0.5) * 0.6, z: (Math.random() - 0.5) * 0.6 };
+      g.add(e); embers.push(e);
+    }
+    g.position.set(wx(t.x, t.z), TOP, wz(t.z));
+    world.add(g);
+    t.mesh.material.color.multiplyScalar(0.55);   // charred ground
+    fires.push({ t, mesh: g, flames, embers });
+  }
+  function removeFire(t) {
+    const i = fires.findIndex(f => f.t === t);
+    if (i >= 0) { world.remove(fires[i].mesh); fires.splice(i, 1); }
+  }
+  function burnOut() {
+    tiles.filter(t => t.burn && (t.burn.by === cp || !players[t.burn.by] || !players[t.burn.by].alive) && t.burn.at < turn).forEach(t => {
+      removeFire(t); t.burn = null; t.amount = 0; setTileType(t, 'meadow');
+      floatAt(posOf(t.x, t.z), 'Burned down to meadow', '#a59d8b', 1.2);
+    });
+  }
+
+  // ----- pots of gold -----
+  const potIron = new THREE.MeshStandardMaterial({ color: 0x23201e, roughness: 0.45, metalness: 0.6 });
+  const sparkMat = new THREE.MeshBasicMaterial({ color: 0xfff1a8, transparent: true, depthWrite: false });
+  function addPot(x, z) {
+    const g = new THREE.Group(), bob = new THREE.Group();
+    const body = shadowed(new THREE.Mesh(new THREE.SphereGeometry(0.15, 16, 12), potIron)); body.scale.set(1, 0.85, 1); body.position.y = 0.13;
+    const rim = shadowed(new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.022, 8, 18), potIron)); rim.rotation.x = Math.PI / 2; rim.position.y = 0.245;
+    const heap = shadowed(new THREE.Mesh(new THREE.SphereGeometry(0.105, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), M.gold)); heap.scale.set(1, 0.7, 1); heap.position.y = 0.24;
+    bob.add(body, rim, heap);
+    for (let i = 0; i < 6; i++) {
+      const a = i / 6 * Math.PI * 2, c = shadowed(new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.012, 12), M.gold));
+      if (i < 3) { c.position.set(Math.cos(a) * 0.05, 0.31 + i * 0.012, Math.sin(a) * 0.05); c.rotation.set(0.3 * i, 0, 0.4); bob.add(c); }
+      else { c.position.set(Math.cos(a) * 0.24, 0.008, Math.sin(a) * 0.24); g.add(c); }   // a few coins spilled on the ground
+    }
+    const glow = new THREE.Mesh(new THREE.RingGeometry(0.16, 0.36, 28), new THREE.MeshBasicMaterial({ color: 0xf2c14a, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false }));
+    glow.rotation.x = -Math.PI / 2; glow.position.y = 0.012; g.add(glow);
+    const sparks = [];
+    for (let i = 0; i < 5; i++) { const sp = new THREE.Mesh(new THREE.OctahedronGeometry(0.025, 0), sparkMat); sp.userData.ph = i / 5; bob.add(sp); sparks.push(sp); }
+    g.add(bob);
+    g.position.set(wx(x, z), TOP, wz(z));
+    g.scale.set(0.01, 0.01, 0.01); tween(500, (k, e) => { const v = 0.01 + 0.99 * e; g.scale.set(v, v, v); });
+    world.add(g);
+    pots.push({ x, z, mesh: g, bob, glow, sparks });
+  }
+  function removePot(q, animate) {
+    pots.splice(pots.indexOf(q), 1);
+    if (!animate) return world.remove(q.mesh);
+    tween(450, (k, e) => { const v = 1 - e * 0.99; q.mesh.scale.set(v, v, v); q.mesh.position.y = TOP + e * 0.4; }, () => world.remove(q.mesh));
+  }
+  function claimPots(u) {
+    pots.filter(q => dist(u, q) <= 1).forEach(q => {
+      const g = randInt(...POT_GOLD);
+      players[u.owner].stock.gold += g;
+      if (u.owner === cp) pulse('gold', 'bump');
+      undoStack = [];   // gold found can't be un-found
+      floatAt(posOf(q.x, q.z), `Pot of gold! +${g} Gold`, '#f2c14a', 1.3, 200);
+      say(`${label(u)} found the pot of gold: +${g} gold for ${players[u.owner].name}.`);
+      removePot(q, true);
+    });
+  }
+
+  // ----- bandit tents from the turn event: a tent with no bandit that lashes out at neighbours -----
+  function makeCamp(b) {
+    b.camp = true;
+    b.mesh.children.forEach(c => { if (c !== b.mesh.userData.bar) c.visible = false; });
+    const m = makeTent();
+    m.traverse(o => { o.userData.banditId = b.id; });
+    const pp = posOf(b.x, b.z); m.position.set(pp.x, pp.y, pp.z); m.scale.set(1.6, 1.6, 1.6); m.rotation.y = Math.random() * 6.28;
+    world.add(m); b.tentMesh = m;
+  }
+
+  // ----- online: keep fires, pots and the event notice in step -----
+  function syncWorldExtras(s) {
+    (s.tiles || []).forEach((d, i) => {
+      const t = tiles[i]; if (!t) return;
+      const bd = d[5];
+      if (bd && !t.burn) { t.burn = { by: bd[0], at: bd[1] }; addFire(t); }
+      else if (!bd && t.burn) { t.burn = null; removeFire(t); }
+    });
+    const want = new Set((s.pots || []).map(([x, z]) => `${x},${z}`));
+    pots.slice().forEach(q => { if (!want.has(`${q.x},${q.z}`)) removePot(q, true); });
+    (s.pots || []).forEach(([x, z]) => { if (!pots.some(q => q.x === x && q.z === z)) addPot(x, z); });
+    lastEvent = s.event || null;
+    if (s.event && s.event.id !== toastSeen && !isLocalTurn()) { toastSeen = s.event.id; showToast(s.event); }
+  }
+  function animateExtras(now) {
+    fires.forEach(f => {
+      f.flames.forEach(fl => { const d = fl.userData; const k = d.base * (0.75 + 0.35 * Math.sin(now * d.sp + d.ph) + 0.1 * Math.sin(now * 0.05 + d.ph * 3)); fl.scale.set(d.base * (0.9 + 0.1 * Math.sin(now * 0.03 + d.ph)), k, d.base); fl.rotation.y = now * 0.002 + d.ph; });
+      f.embers.forEach(e => { const d = e.userData, k = (now * 0.0005 + d.ph) % 1; e.position.set(d.x * (1 - k * 0.4), 0.05 + k * 0.85, d.z * (1 - k * 0.4)); e.material.opacity = 1 - k; });
+    });
+    pots.forEach(q => {
+      q.bob.position.y = 0.03 + 0.03 * Math.sin(now * 0.004 + q.x);
+      q.bob.rotation.y = now * 0.0008;
+      q.glow.material.opacity = 0.25 + 0.15 * Math.sin(now * 0.005);
+      q.sparks.forEach(sp => { const a = now * 0.0015 + sp.userData.ph * Math.PI * 2; sp.position.set(Math.cos(a) * 0.2, 0.3 + 0.1 * Math.sin(a * 2), Math.sin(a) * 0.2); const tw = 0.6 + 0.6 * Math.abs(Math.sin(now * 0.008 + sp.userData.ph * 9)); sp.scale.set(tw, tw, tw); sp.rotation.y = a * 2; });
+    });
+  }
+
+  // AI: send a unit that can reach a pot of gold this turn to grab it
+  async function aiPots(token) {
+    for (const q of pots.slice()) {
+      if (!aiStillValid(token) || !pots.includes(q)) continue;
+      let best = null;
+      mine().filter(u => !u.done && !u.moved && !UNITS[u.kind].totem).forEach(u => {
+        if (dist(u, q) <= 1) return;
+        reachable(u).forEach((path, t) => { if (dist(t, q) <= 1 && (!best || path.length < best.path.length)) best = { u, path }; });
+      });
+      if (!best) continue;
+      cam.goal.set(best.u.mesh.position.x, 0, best.u.mesh.position.z);
+      moveAlong(best.u, best.path); await idle(); await sleep(150);
+      best.u.done = true;
     }
   }
 
@@ -3419,6 +3718,7 @@
       refreshMarkers(); updateHUD();
     } else if (a.type === 'wall') {
       refund(a.cost);
+      if (a.free) P().freeWalls = (P().freeWalls || 0) + 1;
       if (walls.has(a.w.key)) removeWall(a.w);
       say(`Wall removed. ${costText(a.cost)} refunded.`);
       refreshMarkers(); updateHUD();
@@ -3562,6 +3862,7 @@
     const growing = f.crops.length - ripe.length;
     const entry = { who: 'Farm', type: 'farm', name: 'Farm', res: 'food', n: 0, notes: [] };
     ripe.forEach(() => { entry.n += randInt(1, 2); });
+    if (P().bounty && entry.n) { entry.n *= 2; entry.notes.push({ cls: 'ev', text: 'Bountiful harvest: the crop is doubled.' }); }
     f.crops = f.crops.filter(c => turn - c.planted < SEED_GROW_TURNS);
     if (ripe.length) {
       stock.food += entry.n; got.push(['food', entry.n]); pulse('food', 'bump');
@@ -3623,7 +3924,7 @@
     return `<div class="bp-row"><b>${STRUCT[kind].name}${kind === 'wall' ? ' <span class="bp-stats">(per section)</span>' : ''}</b>
       <span class="bp-stats">${STRUCT_TEXT[kind][0]}</span>
       <span class="bp-stats">${STRUCT_TEXT[kind][1]}</span>
-      <span class="bp-cost">${chips(structCost(kind))}</span>
+      <span class="bp-cost">${kind === 'wall' && P().freeWalls > 0 ? `<span class="bp-stats">Free · ${P().freeWalls} left from the dwarf</span>` : chips(structCost(kind))}</span>
       <button class="${why ? '' : 'primary'}" data-act="struct-${kind}" ${why ? 'disabled' : ''}>Build</button>
       ${why ? `<span class="bp-why">${why}</span>` : ''}</div>`;
   }
@@ -4075,6 +4376,7 @@
   try { const nm = localStorage.getItem('roth-name'); if (nm) $('olName').value = nm; } catch (e) {}
   $('olName').addEventListener('change', () => { try { localStorage.setItem('roth-name', $('olName').value.trim()); } catch (e) {} });
   $('reportGo').addEventListener('click', closeReport);
+  $('reportEvent').addEventListener('click', e => { const b = e.target.closest('[data-evc]'); if (b && !b.disabled) chooseEvent(+b.dataset.evc); });
 
   const keys = new Set();
   window.addEventListener('keydown', e => {
@@ -4119,6 +4421,7 @@
       tw.step(k, e);
       if (k >= 1) { tweens.splice(i, 1); tw.done && tw.done(); }
     }
+    animateExtras(now);
     const glow = 0.5 + 0.5 * Math.sin(now * 0.006);
     moves.forEach((_, t) => { if (t.mesh.material !== waterMat) t.mesh.material.emissive.setRGB(0.04 + 0.04 * glow, 0.42 + 0.28 * glow, 0.1 + 0.06 * glow); });
     showRings([...moves.keys()], now);

@@ -439,6 +439,7 @@
     wolf:    { name: 'Wolf',      hp: 1, atk: 1, range: 1, moves: 3, noFood: true, summon: true, from: 'base' },
     skeleton:{ name: 'Skeleton',  hp: 1, atk: 1, range: 1, moves: 3, noFood: true, summon: true, explodes: true, from: 'base' },
     hunch:   { name: 'Hunchback', hp: 2, atk: 0, range: 1, moves: 2, taunt: true,  summon: true, from: 'base' },
+    totem:   { name: 'Healing totem', hp: 3, atk: 0, range: 0, moves: 0, noFood: true, summon: true, totem: true, from: 'base' },
   };
   const FACTIONS = {
     hearth: { name: 'Hearthfolk',         hero: 'brena',
@@ -456,7 +457,7 @@
     orc:    { name: 'Ashen Orcs',         hero: 'grukk',
               perks: 'Every unit has +1 HP. Gather 1 less on everything.',
               heroText: 'Grukk (6 HP, hits 2). Bandits he kills drop double loot.',
-              ability: 'Summon hunchback', abilityText: 'An orc hunchback (2 HP, hits 0) appears next to Grukk. Enemies next to it must attack it first. Up to 3.' },
+              ability: 'Healing totem', abilityText: 'A healing totem rises next to Grukk for 2 turns. It can\'t move, and heals your units next to it for 2 HP each turn.' },
     dwarf:  { name: 'Stoneheart Dwarves', hero: 'durnik',
               perks: 'Quarries and gold veins never roll 0, and gold rolls higher. Every 4th upkeep costs double food.',
               heroText: 'Durnik (4 HP, gathers). Digs twice on quarries and gold veins; emptied veins become quarries.',
@@ -465,7 +466,8 @@
   const FACTION_ORDER = ['hearth', 'wolf', 'mer', 'orc', 'dwarf'];
   const ABILITY_CD = 4;            // turns between hero abilities
   const AI_FOOD_EVERY = 3, AI_FOOD_BONUS = 8;   // AI players get 8 food every 3rd turn
-  const SUMMON_CAP = 3;            // wolves or hunchbacks alive at once
+  const SUMMON_CAP = 3;            // tamed wolves alive at once
+  const TOTEM_TURNS = 2, TOTEM_HEAL = 2;   // Grukk's healing totem: heals on the turn it rises and the next
   const HERO_RETURN = 3;           // turns before a fallen hero returns
   const HERO_REVIVE_GOLD = 2;
   const DWARF_MINE = [[1, 35], [2, 38], [3, 27]];   // about 1.9 gold, never 0
@@ -911,7 +913,24 @@
     const cloth = teamMat(owner, false);
     const bodyMat = kind === 'footman' ? M.steel : cloth;
     const isHero = !!UNITS[kind].hero;
-    if (kind !== 'wolf') {
+    if (kind === 'totem') {   // a carved post with stacked orc faces, a skull on top and a green glow at the foot
+      const wood = mat(0x5e3f26), carve = mat(0x3b2716);
+      const post = shadowed(new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.09, 0.62, 8), wood)); post.position.y = 0.31;
+      g.add(post);
+      [0.18, 0.4].forEach((y, i) => {
+        const face = shadowed(new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.15, 0.19), i ? M.orcSkin : wood)); face.position.y = y; face.rotation.y = Math.PI / 4;
+        [-0.035, 0.035].forEach(o => { const eye = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.025, 0.02), mat(0x9dff7a)); eye.position.set(o, y + 0.03, 0.1); g.add(eye); });
+        const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.02, 0.02), carve); mouth.position.set(0, y - 0.035, 0.1);
+        g.add(face, mouth);
+      });
+      [-1, 1].forEach(sd => { const wing = shadowed(new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.05, 0.03), cloth)); wing.position.set(sd * 0.15, 0.5, 0); wing.rotation.z = sd * 0.35; g.add(wing); });
+      const skull = shadowed(new THREE.Mesh(new THREE.SphereGeometry(0.065, 10, 8), M.bone)); skull.position.y = 0.66;
+      [-1, 1].forEach(sd => { const horn = shadowed(new THREE.Mesh(new THREE.ConeGeometry(0.018, 0.09, 6), M.bone)); horn.position.set(sd * 0.07, 0.7, 0); horn.rotation.z = -sd * 1.0; g.add(horn); });
+      const glow = new THREE.Mesh(new THREE.RingGeometry(0.12, 0.3, 24), new THREE.MeshBasicMaterial({ color: 0x6dff8a, transparent: true, opacity: 0.45, side: THREE.DoubleSide, depthWrite: false }));
+      glow.rotation.x = -Math.PI / 2; glow.position.y = 0.015;
+      g.add(skull, glow);
+    }
+    if (kind !== 'wolf' && kind !== 'totem') {
       const body = shadowed(new THREE.Mesh(pawnGeo, bodyMat));
       const skin = kind === 'grukk' || kind === 'hunch' ? M.orcSkin : kind === 'skeleton' ? M.bone : M.skin;
       if (kind === 'skeleton') body.material = M.bone;
@@ -1562,6 +1581,7 @@
   function startTurn() {
     phase = 'gather'; busy = true; selected = null; moves = new Map(); targets = []; refreshMarkers(); updateHUD();
     const { report, got } = gatherAll(false);
+    tickTotems(report);
     // AI bonus: every 3rd turn an AI settlement receives extra supplies, to make it tougher to beat
     if (P().ai && turn % AI_FOOD_EVERY === 0) {
       stock.food += AI_FOOD_BONUS; got.push(['food', AI_FOOD_BONUS]); pulse('food', 'bump');
@@ -1717,7 +1737,9 @@
         <div class="body"><div class="who">${esc(e.who)}</div>${amt}${e.notes.map(n => `<div class="note ${n.cls}">${esc(n.text)}</div>`).join('')}</div></article>`;
     }).join('');
     const total = summarize(got);
-    let line = total ? `Total this turn: ${total}. Upkeep will cost ${mine().length} food.` : `Nothing was gathered this turn. Upkeep will cost ${mine().length} food.`;
+    const dblUp = fac() === 'dwarf' && (P().upkeeps + 1) % 4 === 0;
+    const cost = P().feast ? 0 : mine().filter(u => !UNITS[u.kind].noFood).length * (dblUp ? 2 : 1);   // summons that never eat don't count
+    let line = total ? `Total this turn: ${total}. Upkeep will cost ${cost} food.` : `Nothing was gathered this turn. Upkeep will cost ${cost} food.`;
     const rc = raiders().filter(b => b.target === cp).length;
     if (rc) line += ` ${rc} roaming bandit${rc > 1 ? 's are' : ' is'} on the map and will steal after your moves.`;
     $('reportTotal').textContent = line;
@@ -1745,7 +1767,7 @@
         say(`${UNITS[kind].name} has returned to the base (${HERO_REVIVE_GOLD} gold).`);
       } else say(`${UNITS[kind].name} is ready to return but needs ${HERO_REVIVE_GOLD} gold and a free hex at the base.`);
     }
-    mine().forEach(u => { u.moved = false; u.done = false; u.extraMoves = 0; if (!extra) u.drug = false; });
+    mine().forEach(u => { u.moved = false; u.done = !!UNITS[u.kind].totem; u.extraMoves = 0; if (!extra) u.drug = false; });   // totems never move
     selectNext(true);
     updateHUD();
     if (P().ai) runAI();
@@ -2628,7 +2650,7 @@
       tiles: tiles.map(t => [t.type, t.amount, t.max, t.owner == null ? -1 : t.owner, t.crops ? t.crops.map(c => c.planted) : null]),
       units: units.map(u => ({ id: u.id, owner: u.owner, kind: u.kind, num: u.num, x: u.x, z: u.z, hp: u.hp, moved: u.moved, done: u.done, hungry: u.hungry,
         tools: [...u.tools], silver: !!u.silver, sword: !!u.sword, wornSword: u.wornSword || 0, armor: !!u.armor, scope: !!u.scope, horse: !!u.horse,
-        bubble: !!u.bubble, power: u.power || 0, drug: !!u.drug, fought: !!u.fought, extraMoves: u.extraMoves || 0, rot: u.mesh.rotation.y })),
+        bubble: !!u.bubble, power: u.power || 0, drug: !!u.drug, fought: !!u.fought, extraMoves: u.extraMoves || 0, life: u.life || 0, rot: u.mesh.rotation.y })),
       bandits: bandits.map(b => ({ id: b.id, x: b.x, z: b.z, hp: b.hp, guard: b.guard, target: b.target, tent: !!b.tent })),
       tentClock,
       lair: lair ? { hp: lair.hp, alive: lair.alive } : null,
@@ -2657,7 +2679,7 @@
   function unitFromData(d) {
     const u = { id: d.id, owner: d.owner, kind: d.kind, num: d.num, x: d.x, z: d.z, hp: d.hp, moved: d.moved, done: d.done, hungry: d.hungry,
       tools: new Set(d.tools || []), silver: d.silver, sword: d.sword, wornSword: d.wornSword, armor: d.armor, scope: d.scope, horse: d.horse,
-      bubble: d.bubble, power: d.power, drug: d.drug, fought: d.fought, extraMoves: d.extraMoves };
+      bubble: d.bubble, power: d.power, drug: d.drug, fought: d.fought, extraMoves: d.extraMoves, life: d.life || 0 };
     u.mesh = makeUnit(d.kind, d.owner);
     u.mesh.traverse(o => { o.userData.unitId = u.id; });
     u.mesh.position.copy(posOf(d.x, d.z)); u.mesh.rotation.y = d.rot || 0;
@@ -2777,7 +2799,7 @@
       if (u.x !== d.x || u.z !== d.z) { u.x = d.x; u.z = d.z; hop(u.mesh, posOf(d.x, d.z), 320, 0.3); }
       const hadArmor = u.armor;
       Object.assign(u, { hp: d.hp, moved: d.moved, done: d.done, hungry: d.hungry, silver: d.silver, sword: d.sword, wornSword: d.wornSword, armor: d.armor, scope: d.scope,
-        bubble: d.bubble, power: d.power, drug: d.drug, fought: d.fought, extraMoves: d.extraMoves, tools: new Set(d.tools || []) });
+        bubble: d.bubble, power: d.power, drug: d.drug, fought: d.fought, extraMoves: d.extraMoves, life: d.life || 0, tools: new Set(d.tools || []) });
       if (d.horse && !u.horse) { u.horse = true; addHorse(u); }
       if (hadArmor !== u.armor) u.mesh.userData.bar.userData.max = maxHpU(u);
       if (Math.abs(u.mesh.userData.bar.userData.shown - u.hp / maxHpU(u)) > 0.001) setBar(u.mesh.userData.bar, u.hp);
@@ -3157,11 +3179,8 @@
     if (P().cd > 0) return `Ready in ${P().cd} turn${P().cd > 1 ? 's' : ''}.`;
     const f = fac();
     if (f === 'hearth' && P().feast) return 'The feast is already set for this upkeep.';
-    if (f === 'wolf' || f === 'orc') {
-      const kind = f === 'wolf' ? 'wolf' : 'hunch';
-      if (mine().filter(u => u.kind === kind).length >= SUMMON_CAP) return `You already have ${SUMMON_CAP} ${UNITS[kind].name.toLowerCase()}s.`;
-      if (!freeNear(h).length) return `No free hex next to ${UNITS[h.kind].name}.`;
-    }
+    if (f === 'wolf' && mine().filter(u => u.kind === 'wolf').length >= SUMMON_CAP) return `You already have ${SUMMON_CAP} wolves.`;
+    if ((f === 'wolf' || f === 'orc') && !freeNear(h).length) return `No free hex next to ${UNITS[h.kind].name}.`;
     if (f === 'mer' && !mine().some(u => !u.bubble)) return 'Every unit already has a bubble.';
     return null;
   }
@@ -3215,6 +3234,32 @@
       icon.scale.setScalar(0.8 + 0.3 * Math.min(1, k * 4));
     }, () => world.remove(icon));
   }
+  // healing totems: heal friends next to them, then count down and crumble
+  function totemHeal(t) {
+    const healed = [];
+    mine().filter(u => u !== t && dist(u, t) === 1 && u.hp < maxHpU(u)).forEach(u => {
+      const n = Math.min(TOTEM_HEAL, maxHpU(u) - u.hp);
+      u.hp += n; setBar(u.mesh.userData.bar, u.hp);
+      floatAt(u.mesh.position, `+${n} HP`, '#7dff9a', 1.1, 200);
+      healed.push(`${label(u)} +${n}`);
+    });
+    t.life = (t.life || 0) - 1;
+    return healed;
+  }
+  function tickTotems(report) {
+    mine().filter(u => UNITS[u.kind].totem).forEach(t => {
+      if ((t.life || 0) <= 0) {   // its time is up
+        units.splice(units.indexOf(t), 1);
+        tween(500, (k, e) => { t.mesh.scale.set(1, 1 - e * 0.99, 1); }, () => world.remove(t.mesh));
+        report.push({ who: 'Totem', type: 'ruins', name: 'Healing totem', res: null, n: 0, skip: true, notes: [{ cls: 'dim', text: 'The healing totem crumbled away.' }] });
+        return;
+      }
+      const healed = totemHeal(t);
+      report.push({ who: 'Totem', type: 'ruins', name: 'Healing totem', res: null, n: 0, skip: true,
+        notes: [{ cls: healed.length ? 'ev' : 'dim', text: healed.length ? `Healed ${healed.join(', ')}.` : 'Nobody next to it needed healing.' },
+                { cls: 'dim', text: t.life > 0 ? 'It heals once more next turn.' : 'It crumbles at the start of your next turn.' }] });
+    });
+  }
   function useAbility() {
     if (abilityBlock()) return;
     const h = heroOf(), f = fac();
@@ -3225,14 +3270,22 @@
       P().feast = true; P().feastWhy = 'feast';
       floatAt(h.mesh.position, 'Harvest feast!', RES_COLOR.food, 1.2);
       say('Brena calls a harvest feast. Nobody will need food at this upkeep.');
-    } else if (f === 'wolf' || f === 'orc') {
-      const kind = f === 'wolf' ? 'wolf' : 'hunch';
+    } else if (f === 'orc') {
+      const t = pickOne(freeNear(h));
+      const s = addUnit('totem', t.x, t.z);
+      s.moved = true; s.done = true; s.life = TOTEM_TURNS;
+      s.mesh.scale.set(1, 0.01, 1);
+      tween(500, (k, e) => { s.mesh.scale.set(1, 0.01 + 0.99 * e, 1); });
+      const healed = totemHeal(s);
+      say(`Grukk raised a healing totem. ${healed.length ? `It healed ${healed.join(', ')}. ` : ''}It heals your units next to it for ${TOTEM_HEAL} HP now and at the start of your next turn.`);
+    } else if (f === 'wolf') {
+      const kind = 'wolf';
       const t = pickOne(freeNear(h));
       const s = addUnit(kind, t.x, t.z);
       s.moved = true; s.done = true;
       s.mesh.scale.set(0.01, 0.01, 0.01);
       tween(400, (k, e) => { const v = 0.01 + 0.99 * e; s.mesh.scale.set(v, v, v); });
-      say(kind === 'wolf' ? `Fenric tamed ${label(s)}. It moves 3, never eats, and hits for 2 beside him.` : `Grukk summoned ${label(s)}. Enemies next to it must strike it first.`);
+      say(`Fenric tamed ${label(s)}. It moves 3, never eats, and hits for 2 beside him.`);
     } else if (f === 'mer') {
       const u = pickOne(mine().filter(q => !q.bubble));
       u.bubble = true;

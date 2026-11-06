@@ -272,7 +272,7 @@
         <span><i class="sw" style="background:#6e5f4c"></i>Gold vein → 0–3 gold</span>
         <span><i class="sw" style="background:#c9b98a"></i>Riverbank → 0–4 food, plus river finds</span>
       </div>
-      <p>On an island in the middle of the river sits a <b>bandit lair</b> (8 HP), ringed by bone-strewn grounds you can cross at your own risk. Its guards don't steal, but they hit anyone who comes close, and a new one comes out every 3 turns. The lair also hurls spears at up to 2 units within 3 hexes each turn, for 2 damage. Destroy it for its hoard. After that, a bandit tent with a single bandit pops up on a random meadow every 10 player turns.</p>
+      <p>On an island in the middle of the river sits a <b>bandit lair</b> (8 HP), ringed by bone-strewn grounds you can cross at your own risk. Its guards don't steal, but they hit anyone who comes close, and a new one comes out every 3 turns. The lair also hurls spears at up to 2 units within 2 hexes each turn, for 2 damage. Destroy it for its hoard. After that, a bandit tent with a single bandit pops up on a meadow within 6 hexes of the old lair every 10 player turns.</p>
       <p>Bandits have 3 HP. When killed they drop gold, a worn-out tool, a demon drug or a shield scroll, plus 1–6 wheat seeds. A farm harvest saves a seed half the time. Build a barracks to train footmen (3 HP, hit for 2) and archers (shoot 3 tiles away).</p>
       </details>
       <p style="color:var(--muted);font-size:13.5px">Drag to rotate. Right-drag, two fingers or WASD to pan. Scroll or pinch to zoom.</p>
@@ -516,8 +516,9 @@
   const MAX_BANDITS = 4;         // cap on roaming (ambush) bandits
   const LAIR = { x: 10, z: RIVER_Z };  // an island in the middle of the river
   const LAIR_HP = 8;
-  const LAIR_SPEAR_RANGE = 3, LAIR_SPEAR_DMG = 2, LAIR_SPEAR_TARGETS = 2;   // the lair hurls spears at units that come close
-  const TENT_EVERY = 10;         // after the lair falls, a bandit tent pops up every 10 player turns
+  const LAIR_SPEAR_RANGE = 2, LAIR_SPEAR_DMG = 2, LAIR_SPEAR_TARGETS = 2;   // the lair hurls spears at units that come close
+  const TENT_EVERY = 10;         // after the lair falls, a bandit tent pops up every 10 player turns...
+  const TENT_RANGE = 6;          // ...on a meadow within 6 hexes of the old lair
   const FARM_SEED_CHANCE = 0.5;
   const LAIR_EVERY = 3;          // a new guard comes out every 3 turns...
   const LAIR_MAX_GUARDS = 3;     // ...while fewer than 3 guard it
@@ -1437,8 +1438,9 @@
     tween(500, (k, e) => { m.scale.set(1, 1 - e * 0.99, 1); }, () => world.remove(m));
   }
   function spawnTent() {
-    const spots = tiles.filter(t => t.type === 'meadow' && walkable(t) && !occupied(t) && !banditAt(t.x, t.z)
-      && players.every(pl => !pl.alive || dist(pl.base, t) >= 4));
+    const free = t => walkable(t) && !occupied(t) && !banditAt(t.x, t.z) && dist(t, LAIR) <= TENT_RANGE && dist(t, LAIR) >= 1;
+    let spots = tiles.filter(t => t.type === 'meadow' && free(t));
+    if (!spots.length) spots = tiles.filter(t => t.type === 'lairland' && free(t));   // no open meadow nearby: camp on the old lair grounds
     if (!spots.length) return null;
     const t = pickOne(spots);
     const b = addBandit(t.x, t.z, false, null);

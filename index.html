@@ -45,7 +45,19 @@
   .phases li.on.foe { background: var(--danger); }
   .phases li.done { color: var(--parch); border-color: var(--line); }
 
-  #stock { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 6px; gap: 4px; min-width: 0; }
+  #stock { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 6px 26px 6px 6px; gap: 4px; min-width: 0; }
+  /* the resource tracker folds into a small button at the upper right */
+  .stockwrap { position: relative; margin-left: auto; min-width: 0; display: flex; justify-content: flex-end; }
+  .stock-fold { position: absolute; top: 5px; right: 5px; width: 20px; height: 20px; padding: 0; display: grid; place-items: center; border-radius: 6px;
+    background: rgba(235, 225, 203, 0.06); border: 1px solid var(--line); color: var(--muted); cursor: pointer; }
+  .stock-fold:hover { color: var(--parch); border-color: rgba(235, 225, 203, 0.35); }
+  .stock-pill { display: inline-flex; align-items: center; gap: 7px; padding: 7px 11px; cursor: pointer; font: inherit; color: var(--parch); }
+  .stock-pill[hidden] { display: none; }
+  .stock-pill #pillIcon svg { width: 18px; height: 18px; display: block; }
+  .stock-pill b { font-size: 16px; font-variant-numeric: tabular-nums; line-height: 1; }
+  .stock-pill.warn b { color: var(--danger); }
+  .stock-pill:hover { border-color: rgba(235, 225, 203, 0.35); }
+  .stockwrap.folded #stock, .stockwrap.folded .stock-fold { display: none; }
   .res { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; align-items: center; padding: 5px 10px; border-radius: 7px; }
   .res svg { grid-row: span 2; width: 22px; height: 22px; }
   .res .n { font-weight: 700; font-size: 18px; font-variant-numeric: tabular-nums; line-height: 1; }
@@ -252,6 +264,11 @@
   @media (max-width: 700px) {
     .brand h1 { font-size: 21px; }
     .brand { width: 100%; }
+    .stockwrap:not(.folded) { width: 100%; }
+    .stockwrap.folded { position: absolute; right: 0; bottom: 0; }   /* sits on the Restart map row instead of taking a row of its own */
+    #stock { padding-right: 6px; }
+    .stock-fold { top: -7px; right: -5px; width: 22px; height: 22px; border-radius: 50%; background: #23262d; z-index: 1; }
+    .res .lbl { white-space: normal; line-height: 1.15; font-size: 10px; }
     #stock { width: 100%; }
     .res { padding: 4px 6px; column-gap: 6px; }
     .res svg { width: 18px; height: 18px; }
@@ -278,7 +295,16 @@
     </div>
     <button id="restart" class="restart" title="Start over on a new map">Restart map</button>
     </div>
-    <div class="panel" id="stock"></div>
+    <div class="stockwrap" id="stockWrap">
+      <div class="panel" id="stock"></div>
+      <button class="stock-fold" id="stockFold" title="Collapse resources" aria-label="Collapse resources" aria-expanded="true">
+        <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M3 10l5-5 5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="panel stock-pill" id="stockPill" hidden title="Show resources" aria-label="Show resources" aria-expanded="false">
+        <span id="pillIcon"></span><b id="pillFood">0</b>
+        <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M3 6l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
   </div>
   <div class="hud" id="bottom">
     <div class="panel" id="info">
@@ -640,6 +666,7 @@
   // ---------- DOM ----------
   const game = document.getElementById('game');
   const $ = id => document.getElementById(id);
+  $('pillIcon').innerHTML = ICONS.food;
   $('stock').innerHTML = RES.map(r => `<div class="res" id="res-${r}">${ICONS[r]}<span class="n" id="n-${r}">0</span><span class="lbl" id="l-${r}">${RES_LABEL[r]}</span></div>`).join('');
 
   // ---------- Three.js setup ----------
@@ -4533,6 +4560,9 @@
     RES.forEach(r => { $('n-' + r).textContent = stock[r]; });
     const dbl = fac() === 'dwarf' && (P().upkeeps + 1) % 4 === 0;
     const eat = P().feast ? 0 : mine().filter(u => !UNITS[u.kind].noFood).length * (dbl ? 2 : 1);
+    $('pillFood').textContent = stock.food;
+    $('stockPill').classList.toggle('warn', $('res-food').classList.contains('warn') || stock.food < eat);
+    $('stockPill').title = `Show resources · ${RES.map(r => `${stock[r]} ${r}`).join(', ')}`;
     $('l-food').textContent = `Food · eats ${eat}${P().feast ? (P().feastWhy === 'crate' ? ' (crate)' : ' (feast)') : dbl ? ' (double)' : ''}`;
     $('res-food').classList.toggle('warn', stock.food < eat);
 
@@ -4802,6 +4832,17 @@
   try { const nm = localStorage.getItem('roth-name'); if (nm) $('olName').value = nm; } catch (e) {}
   $('olName').addEventListener('change', () => { try { localStorage.setItem('roth-name', $('olName').value.trim()); } catch (e) {} });
   $('reportGo').addEventListener('click', closeReport);
+  // resource tracker: fold to a small button, remembered per device
+  function setStockFolded(on) {
+    $('stockWrap').classList.toggle('folded', on);
+    $('stockPill').hidden = !on;
+    $('stockFold').setAttribute('aria-expanded', String(!on));
+    try { localStorage.setItem('roth.stockFolded', on ? '1' : '0'); } catch (e) {}
+    if (cardUnit) renderUnitCard();
+  }
+  $('stockFold').addEventListener('click', () => setStockFolded(true));
+  $('stockPill').addEventListener('click', () => setStockFolded(false));
+  try { if (localStorage.getItem('roth.stockFolded') === '1') setStockFolded(true); } catch (e) {}
   $('ucClose').addEventListener('click', hideUnitCard);
   $('ucFold').addEventListener('click', () => { cardFolded = !cardFolded; renderUnitCard(); });
   $('ucBody').addEventListener('click', e => { const b = e.target.closest('[data-rm]'); if (b && cardUnit) removeItem(cardUnit, b.dataset.rm); });

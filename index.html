@@ -357,8 +357,9 @@
         <span><i class="sw" style="background:#6e5f4c"></i>Gold vein → 0–3 gold</span>
         <span><i class="sw" style="background:#c9b98a"></i>Riverbank → 0–4 food, plus river finds</span>
       </div>
-      <p>On an island in the middle of the river sits a <b>bandit lair</b> (8 HP), ringed by bone-strewn grounds you can cross at your own risk. Its guards don't steal, but they hit anyone who comes close, and a new one comes out every 3 turns. The lair also hurls spears at up to 2 units within 2 hexes each turn, for 2 damage. Destroy it for its hoard. After that, a bandit tent with a single bandit pops up on a meadow within 6 hexes of the old lair every 10 player turns.</p>
+      <p>On an island in the middle of the river sits a <b>bandit lair</b> (8 HP), ringed by bone-strewn grounds you can cross at your own risk. Its guards don't steal, but they hit anyone who comes close, and a new one comes out every 3 turns. The lair also hurls spears at up to 2 units within 2 hexes each turn, for 2 damage. Destroy it for its hoard. After that, a bandit tent pops up on a meadow within 6 hexes of the old lair every 10 player turns. Tents don't move or steal, but a bandit walks out of each one every 3 rounds.</p>
       <p><b>Turn events</b> strike every 4th turn of each player: a wandering peasant, a dwarf mason, a travelling merchant, a bountiful harvest, new wheat or forest, a pot of gold, or trouble such as a bandit tent or a fire.</p>
+      <p>Roaming bandits walk up to 2 hexes a round toward the nearest base, and rob any base within 8 hexes of them of 1 food and 1 other resource each turn. Lair guards stay put. Nerissa calms bandits within 3 hexes, and may seduce them into raiding her rivals.</p>
       <p>Bandits have 3 HP. When killed they drop gold, a worn-out tool, a demon drug or a shield scroll, plus 1–6 wheat seeds. A farm harvest saves a seed half the time. Build a barracks to train footmen (3 HP, hit for 2) and archers (shoot 3 tiles away).</p>
       </details>
       <p style="color:var(--muted);font-size:13.5px">Drag to rotate. Right-drag, two fingers or WASD to pan. Scroll or pinch to zoom.</p>
@@ -522,7 +523,7 @@
     // Heroes: one per faction, never recruited
     brena:   { name: 'Brena',   hero: true, hp: 3, atk: 1, range: 2, moves: 2, gathers: true, from: 'base', title: 'the Harvest Keeper' },
     fenric:  { name: 'Fenric',  hero: true, hp: 5, atk: 2, range: 1, moves: 2,                from: 'base', title: 'the Packlord' },
-    nerissa: { name: 'Nerissa', hero: true, hp: 3, atk: 1, range: 1, moves: 3,                from: 'base', title: 'the Tidecaller' },
+    nerissa: { name: 'Nerissa', hero: true, hp: 3, atk: 1, range: 2, moves: 3,                from: 'base', title: 'the Tidecaller' },
     grukk:   { name: 'Grukk',   hero: true, hp: 6, atk: 2, range: 1, moves: 2,                from: 'base', title: 'the Warchief' },
     durnik:  { name: 'Durnik',  hero: true, hp: 4, atk: 2, range: 1, moves: 2, gathers: true, from: 'base', title: 'the Vein Seeker' },
     // Summons
@@ -542,7 +543,7 @@
               ability: 'Tame wolf', abilityText: 'A wolf (1 HP, hits 1, moves 4, never eats) joins next to Fenric. Up to 3. Wolves carry no items, but can take demon drugs and scrolls.' },
     mer:    { name: 'Merfolk',            hero: 'nerissa',
               perks: 'River merchants appear twice as often. Bridges cost half.',
-              heroText: 'Nerissa (3 HP, moves 3). Bandits next to her don\'t attack or steal.',
+              heroText: 'Nerissa (3 HP, moves 3, reach 2). Bandits within 3 hexes of her don\'t attack or steal. Each of your turns, each of them has a 20% chance to be seduced: it raids your rivals and sends what it steals to your base.',
               ability: 'Water sphere', abilityText: 'A random unit without a bubble gets one. It blocks the next hit.' },
     orc:    { name: 'Ashen Orcs',         hero: 'grukk',
               perks: 'Every unit has +1 HP. Gather 1 less on everything.',
@@ -611,6 +612,10 @@
   const BANDIT_CHANCE = 0.025;   // per gathering peasant, per turn
   const BANDIT_GRACE = 3;        // no ambushes before this turn has passed
   const MAX_BANDITS = 4;         // cap on roaming (ambush) bandits
+  const BANDIT_MOVES = 2;        // roaming bandits walk this far toward the nearest base each round
+  const STEAL_RANGE = 8;         // bandits this close to a player's base rob it on that player's turn
+  const NERISSA_CALM = 3, SEDUCE_CHANCE = 0.2;   // bandits near Nerissa are calmed, and may be seduced on her player's turn
+  const CAMP_SPAWN_EVERY = 3;    // a bandit tent sends out a bandit every 3 rounds
   const LAIR = { x: 10, z: RIVER_Z };  // an island in the middle of the river
   const LAIR_HP = 8;
   const LAIR_SPEAR_RANGE = 2, LAIR_SPEAR_DMG = 2, LAIR_SPEAR_TARGETS = 2;   // the lair hurls spears at units that come close
@@ -1181,11 +1186,9 @@
       [-0.032, 0.032].forEach(o => { const shell = shadowed(new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2), mat(0xf2b8c6))); shell.rotation.x = Math.PI / 2; shell.position.set(o, 0.37, 0.055); g.add(shell); });
       const hair = shadowed(new THREE.Mesh(new THREE.SphereGeometry(0.095, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.7), hairM)); hair.position.set(0, 0.44, -0.012);
       const locks = shadowed(new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.2, 10, 1, true), hairM)); locks.position.set(0, 0.36, -0.05); locks.rotation.x = Math.PI + 0.25;
-      // trident
-      const shaft = shadowed(new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.75, 6), mat(0x3b8fa8))); shaft.position.set(0.16, 0.38, 0);
-      [-0.035, 0, 0.035].forEach(o => { const t = shadowed(new THREE.Mesh(new THREE.ConeGeometry(0.012, 0.08, 5), M.steel)); t.position.set(0.16 + o, 0.79, 0); g.add(t); });
-      const prongBar = shadowed(new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.012, 0.012), M.steel)); prongBar.position.set(0.16, 0.75, 0);
-      g.add(tail, torso, hair, locks, shaft, prongBar);
+      // trident (kept as one piece so she can throw it)
+      const tri = makeTrident(); tri.position.set(0.16, 0.38, 0); g.userData.trident = tri;
+      g.add(tail, torso, hair, locks, tri);
     } else if (kind === 'grukk') {
       [-0.04, 0.04].forEach(o => { const tusk = new THREE.Mesh(new THREE.ConeGeometry(0.012, 0.05, 5), mat(0xf0ead8)); tusk.position.set(o, 0.41, 0.08); g.add(tusk); });
       const club = shadowed(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.02, 0.42, 7), M.wood)); club.position.set(0.17, 0.3, 0.03); club.rotation.z = -0.3;
@@ -1583,7 +1586,7 @@
     const t = pickOne(free);
     return addBandit(t.x, t.z, true);
   }
-  const raiders = () => bandits.filter(b => !b.guard);
+  const raiders = () => bandits.filter(b => !b.guard && !b.camp);
   const guards = () => bandits.filter(b => b.guard);
   const banditName = b => b.guard ? 'lair guard' : b.camp ? 'bandit tent' : b.tent ? 'tent bandit' : 'bandit';
 
@@ -1616,10 +1619,11 @@
     if (!spots.length) spots = tiles.filter(t => t.type === 'lairland' && free(t));   // no open meadow nearby: camp on the old lair grounds
     if (!spots.length) return null;
     const t = pickOne(spots);
-    const b = addBandit(t.x, t.z, false, null);
-    attachTent(b);
+    const c = addBandit(t.x, t.z, false, null);
+    makeCamp(c); c.lastSpawn = turn;
     floatAt(posOf(t.x, t.z), 'A bandit tent goes up', '#e0735a', 1.2, 300);
-    return b;
+    spawnFromCamp(c);
+    return c;
   }
 
   // ---------- Walls sit on the edge between two hexes ----------
@@ -1676,6 +1680,37 @@
     tween(280, k => { const t = k < 0.5 ? k * 2 : (1 - k) * 2; obj.position.lerpVectors(from, mid, t); }, () => { obj.position.copy(from); done && done(); });
   }
   const arrowGeo = new THREE.CylinderGeometry(0.01, 0.01, 0.3, 4); arrowGeo.rotateX(Math.PI / 2);
+  function makeTrident() {   // shaft along +y, prongs at the top
+    const t = new THREE.Group();
+    const shaft = shadowed(new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.75, 6), mat(0x3b8fa8)));
+    [-0.035, 0, 0.035].forEach(o => { const p = shadowed(new THREE.Mesh(new THREE.ConeGeometry(0.012, 0.08, 5), M.steel)); p.position.set(o, 0.41, 0); t.add(p); });
+    const bar = shadowed(new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.012, 0.012), M.steel)); bar.position.y = 0.37;
+    t.add(shaft, bar);
+    return t;
+  }
+  // Nerissa hurls her trident, prongs first, then it flies back to her hand
+  function throwTrident(u, at, done) {
+    const held = u.mesh.userData.trident;
+    const from = u.mesh.position.clone(); from.y += 0.55;
+    const to = at.clone(); to.y += 0.3;
+    u.mesh.rotation.y = Math.atan2(to.x - from.x, to.z - from.z);
+    const fly = new THREE.Group(), inner = makeTrident();
+    inner.rotation.x = Math.PI / 2; inner.scale.set(1.3, 1.3, 1.3); fly.add(inner);
+    fly.position.copy(from); world.add(fly);
+    if (held) held.visible = false;
+    const prev = new THREE.Vector3();
+    tween(360, (k) => {
+      prev.copy(fly.position);
+      fly.position.lerpVectors(from, to, k); fly.position.y += Math.sin(Math.PI * k) * 0.45;
+      if (k > 0) fly.lookAt(fly.position.clone().add(fly.position.clone().sub(prev)));
+    }, () => {
+      done && done();
+      const back = u.mesh.position.clone(); back.y += 0.55;
+      const start = fly.position.clone();
+      tween(320, (k) => { fly.position.lerpVectors(start, back, k); fly.position.y += Math.sin(Math.PI * k) * 0.3; fly.rotation.y += 0.35; },
+        () => { world.remove(fly); if (held) held.visible = true; });
+    });
+  }
   function shoot(fromObj, at, done) {
     const from = fromObj.position.clone(); from.y += 0.35;
     const to = at.clone(); to.y += 0.3;
@@ -1973,7 +2008,7 @@
     return true;
   };
   const inRange = u => {
-    const list = bandits.filter(b => canReach(u, b));
+    const list = bandits.filter(b => b.seduced !== u.owner && canReach(u, b));   // never your own seduced bandits
     if (lair && lair.alive && canReach(u, lair)) list.push(lair);
     players.forEach(pl => { if (pl.idx !== u.owner && pl.alive && pl.baseObj && canReach(u, pl.baseObj)) list.push(pl.baseObj); });
     // rival units; a rival hunchback next to you must be dealt with before its friends
@@ -2045,7 +2080,8 @@
       later(() => { if (phase === 'move' && !busy && !selected) selectNext(false); }, 250);
       updateHUD();
     };
-    if (spec.range > 1 && dist(u, b) > 1) shoot(u.mesh, b.mesh.position, finish);
+    if (u.kind === 'nerissa') throwTrident(u, b.mesh.position, finish);
+    else if (spec.range > 1 && dist(u, b) > 1) shoot(u.mesh, b.mesh.position, finish);
     else lunge(u.mesh, b.mesh.position, finish);
   }
 
@@ -2160,6 +2196,8 @@
     };
     const runBandits = () => {
     if (phase === 'over') return;
+    campsSpawn();
+    if (fac() === 'mer') nerissaCharm();
     if (!bandits.length) return wrapUp();
     const list = [...bandits]; let i = 0;
     const next = () => {
@@ -2210,23 +2248,77 @@
     throwNext();
   }
 
+  // ---------- Bandits on the move ----------
+  const BANDIT_BLOCK = ['base', 'barracks', 'farm', 'smith', 'wizard', 'tower', 'lair'];
+  const calmedBy = b => units.find(u => u.kind === 'nerissa' && dist(u, b) <= NERISSA_CALM);
+  const nearestBase = (b, skip = null) => players.filter(pl => pl.alive && pl.idx !== skip).sort((p, q) => dist(p.base, b) - dist(q.base, b))[0] || null;
+  // walk up to BANDIT_MOVES hexes along real paths toward a player's base
+  function banditStep(b, pl, done) {
+    if (!pl || dist(b, pl.base) <= 1) return done();
+    const start = tileAt(b.x, b.z);
+    // walking distance to the base that routes around anyone standing in the way (lair guards on the crossing, units, walls)
+    const goal = tileAt(pl.base.x, pl.base.z), wd = new Map([[goal, 0]]);
+    let q = [goal];
+    while (q.length) {
+      const nx = [];
+      for (const t of q) for (const n of neighbors(t)) {
+        if (!n || wd.has(n) || !walkable(n) || BANDIT_BLOCK.includes(n.type) || wallBetween(t, n) || (n !== start && occupied(n))) continue;
+        wd.set(n, wd.get(t) + 1); nx.push(n);
+      }
+      q = nx;
+    }
+    const prev = new Map([[start, null]]); let frontier = [start];
+    for (let s = 0; s < BANDIT_MOVES; s++) {
+      const nx = [];
+      for (const t of frontier) for (const n of neighbors(t)) {
+        if (prev.has(n) || !walkable(n) || BANDIT_BLOCK.includes(n.type) || occupied(n) || banditAt(n.x, n.z) || wallBetween(t, n)) continue;
+        prev.set(n, t); nx.push(n);
+      }
+      frontier = nx;
+    }
+    const here = wd.has(start) ? wd.get(start) : 1e9;
+    let best = null;
+    prev.forEach((p, t) => { if (t === start) return; const w = wd.has(t) ? wd.get(t) : 1e9; if (w < here && (!best || w < best.w)) best = { t, w }; });
+    if (!best) return done();
+    const path = []; for (let t = best.t; t && t !== start; t = prev.get(t)) path.unshift(t);
+    b.x = best.t.x; b.z = best.t.z;
+    let i = 0;
+    const stepNext = () => { if (i >= path.length) return done(); const t = path[i++]; hop(b.mesh, posOf(t.x, t.z), 260, 0.18, stepNext); };
+    stepNext();
+  }
+  // take 1 food and 1 other resource from a player; with a receiver, the loot goes to them
+  function robPlayer(victim, to = null) {
+    const vs = players[victim].stock, took = [];
+    const move = r => { vs[r]--; took.push(`1 ${r}`); if (victim === cp) pulse(r, 'drain'); if (to != null) { players[to].stock[r]++; if (to === cp) pulse(r, 'bump'); } };
+    if (vs.food > 0) move('food');
+    const pool = ['wood', 'stone', 'gold'].filter(r => vs[r] > 0);
+    if (pool.length) move(pickOne(pool));
+    return took;
+  }
   function banditAct(b, done) {
+    if (b.seduced != null) return b.seduced === cp ? seducedAct(b, done) : done();   // a seduced bandit only acts for its new master
+    if (calmedBy(b)) {   // Nerissa's presence: no attacks, no stealing
+      floatAt(b.mesh.position, 'Calmed by Nerissa', '#8fdcff', 1.2);
+      turnLog.push(`Nerissa kept a ${banditName(b)} calm.`);
+      return done();
+    }
+    const go = () => fightAndSteal(b, done);
+    if (!b.guard && !b.camp) {   // roamers head for the nearest base, moving on that player's turn
+      const pl = nearestBase(b);
+      if (pl && pl.idx === cp) return banditStep(b, pl, () => later(go, 120));
+    }
+    go();
+  }
+  function fightAndSteal(b, done) {
     const steal = () => {
-      if (b.guard || b.target !== cp) return done();   // guards only fight; raiders rob the settlement they ambushed
-      const took = [];
-      if (stock.food > 0) { stock.food--; took.push('1 food'); pulse('food', 'drain'); }
-      const pool = ['wood', 'stone', 'gold'].filter(r => stock[r] > 0);
-      if (pool.length) { const r = pickOne(pool); stock[r]--; took.push(`1 ${r}`); pulse(r, 'drain'); }
+      // lair guards and tents never steal; other bandits rob a base they're within STEAL_RANGE of
+      if (b.guard || b.camp || !P().alive || dist(b, P().base) > STEAL_RANGE) return done();
+      const took = robPlayer(cp);
       floatAt(b.mesh.position, took.length ? `Stole ${took.join(', ')}` : 'Nothing to steal', '#e0735a', 1.25, 150);
       if (took.length) turnLog.push(`A bandit stole ${took.join(' and ')}.`);
       updateHUD();
       done();
     };
-    if (mine().some(u => u.kind === 'nerissa' && dist(u, b) === 1)) {   // Nerissa's bribe
-      floatAt(b.mesh.position, 'Bribed by Nerissa', '#8fdcff', 1.2);
-      turnLog.push(`Nerissa paid off a ${banditName(b)}.`);
-      return done();
-    }
     const near = mine().filter(u => dist(u, b) === 1);   // bandits fight whoever's turn it is
     const baseNear = P().alive && dist(P().base, b) === 1 && !wallBetween(tileAt(b.x, b.z), tileAt(BASE.x, BASE.z));
     if (!near.length && !baseNear) return steal();
@@ -2241,6 +2333,69 @@
       if (w && walls.has(w.key)) hurtWall(w, BANDIT.atk); else hurtUnit(victim, BANDIT.atk, b.camp ? 'The bandit tent' : b.guard ? 'A lair guard' : 'A bandit');
       updateHUD(); steal();
     });
+  }
+  // a seduced bandit marches on the nearest rival base, fights rivals beside it, and robs them for its master
+  function seducedAct(b, done) {
+    const master = b.seduced, pl = nearestBase(b, master);
+    if (!pl) return done();
+    banditStep(b, pl, () => later(() => {
+      const here = tileAt(b.x, b.z);
+      const rob = () => {
+        const vic = players.filter(q => q.alive && q.idx !== master && dist(q.base, b) <= STEAL_RANGE).sort((p, q) => dist(p.base, b) - dist(q.base, b))[0];
+        if (vic) {
+          const took = robPlayer(vic.idx, master);
+          floatAt(b.mesh.position, took.length ? `Stole ${took.join(', ')} for ${players[master].name}` : 'Nothing to steal', '#8fdcff', 1.25, 150);
+          if (took.length) turnLog.push(`A seduced bandit stole ${took.join(' and ')} from ${vic.name} and brought it to ${players[master].name}.`);
+        }
+        updateHUD(); done();
+      };
+      const foes = units.filter(e => e.owner !== master && dist(e, b) === 1 && !wallBetween(here, tileAt(e.x, e.z)));
+      const baseHit = players.find(q => q.alive && q.idx !== master && dist(q.base, b) === 1 && !wallBetween(here, tileAt(q.base.x, q.base.z)));
+      if (foes.length) { const v = pickOne(foes); return lunge(b.mesh, v.mesh.position, () => { hurtUnit(v, BANDIT.atk, 'A seduced bandit'); rob(); }); }
+      if (baseHit) return lunge(b.mesh, posOf(baseHit.base.x, baseHit.base.z), () => { hurtBase(baseHit.idx, BANDIT.atk); updateHUD(); rob(); });
+      rob();
+    }, 120));
+  }
+  function markSeduced(b, owner) {
+    b.seduced = owner;
+    if (b.mesh.userData.seduceRing) b.mesh.remove(b.mesh.userData.seduceRing);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.025, 6, 24), new THREE.MeshBasicMaterial({ color: players[owner].color }));
+    ring.rotation.x = Math.PI / 2; ring.position.y = 0.03;
+    const heart = new THREE.Mesh(new THREE.OctahedronGeometry(0.045, 0), new THREE.MeshBasicMaterial({ color: 0xff7ab8 }));
+    heart.scale.set(1, 1.3, 0.6); ring.add(heart);   // a little pink charm floats above
+    heart.position.set(0, 0, -0.7); heart.rotation.x = -Math.PI / 2;
+    b.mesh.add(ring); b.mesh.userData.seduceRing = ring;
+  }
+  // at the start of Nerissa's player's bandit phase: calmed bandits may fall for her
+  function nerissaCharm() {
+    const n = mine().find(u => u.kind === 'nerissa');
+    if (!n) return;
+    bandits.filter(b => !b.guard && !b.camp && b.seduced == null && dist(b, n) <= NERISSA_CALM).forEach(b => {
+      if (Math.random() >= SEDUCE_CHANCE) return;
+      markSeduced(b, cp);
+      floatAt(b.mesh.position, 'Seduced by Nerissa!', '#ff9ccc', 1.3, 200);
+      turnLog.push(`A bandit fell for Nerissa and now works for ${P().name}.`);
+    });
+  }
+  // bandit tents send out a bandit every few rounds
+  function campsSpawn() {
+    bandits.filter(b => b.camp).forEach(c => {
+      if (c.lastSpawn == null) c.lastSpawn = turn;
+      if (turn - c.lastSpawn < CAMP_SPAWN_EVERY) return;
+      c.lastSpawn = turn;
+      if (raiders().length >= MAX_BANDITS) return;
+      spawnFromCamp(c);
+    });
+  }
+  function spawnFromCamp(c) {
+    const here = tileAt(c.x, c.z);
+    const spots = neighbors(here).filter(n => walkable(n) && !BANDIT_BLOCK.includes(n.type) && !occupied(n) && !banditAt(n.x, n.z) && !wallBetween(here, n));
+    if (!spots.length) return null;
+    const t = pickOne(spots);
+    const b = addBandit(t.x, t.z, false, null);
+    floatAt(posOf(t.x, t.z), 'A bandit leaves the tent', '#e0735a', 1.2, 200);
+    turnLog.push('A bandit came out of a bandit tent.');
+    return b;
   }
 
   // ---------- Upkeep ----------
@@ -2781,7 +2936,7 @@
     undoStack = []; turnLog = [];
     const pos = u.mesh.position.clone();
     const hits = [];
-    bandits.filter(b => dist(b, u) === 1).forEach(b => hits.push(() => hitBandit(b, 1, u)));
+    bandits.filter(b => dist(b, u) === 1 && b.seduced !== u.owner).forEach(b => hits.push(() => hitBandit(b, 1, u)));
     units.filter(e => e.owner !== u.owner && dist(e, u) === 1).forEach(e => hits.push(() => hurtUnit(e, 1, label(u))));
     if (lair && lair.alive && dist(lair, u) === 1) hits.push(() => hitLair(1, u));
     players.forEach(pl => { if (pl.idx !== u.owner && pl.alive && dist(pl.base, u) === 1) hits.push(() => hurtBase(pl.idx, 1, u)); });
@@ -2957,7 +3112,7 @@
       units: units.map(u => ({ id: u.id, owner: u.owner, kind: u.kind, num: u.num, x: u.x, z: u.z, hp: u.hp, moved: u.moved, done: u.done, hungry: u.hungry,
         tools: [...u.tools], silver: !!u.silver, sword: !!u.sword, wornSword: u.wornSword || 0, armor: !!u.armor, scope: !!u.scope, horse: !!u.horse,
         bubble: !!u.bubble, shieldItem: !!u.shieldItem, power: u.power || 0, drug: !!u.drug, fought: !!u.fought, extraMoves: u.extraMoves || 0, life: u.life || 0, rot: u.mesh.rotation.y })),
-      bandits: bandits.map(b => ({ id: b.id, x: b.x, z: b.z, hp: b.hp, guard: b.guard, target: b.target, tent: !!b.tent, camp: !!b.camp })),
+      bandits: bandits.map(b => ({ id: b.id, x: b.x, z: b.z, hp: b.hp, guard: b.guard, target: b.target, tent: !!b.tent, camp: !!b.camp, seduced: b.seduced == null ? null : b.seduced, lastSpawn: b.lastSpawn == null ? null : b.lastSpawn })),
       pots: pots.map(q => [q.x, q.z]),
       event: lastEvent,
       tentClock,
@@ -3001,6 +3156,8 @@
     const b = addBandit(d.x, d.z, d.guard, d.target);
     b.id = d.id; b.hp = d.hp; b.mesh.traverse(o => { o.userData.banditId = b.id; });
     if (d.camp) makeCamp(b); else if (d.tent) attachTent(b);
+    if (d.seduced != null) markSeduced(b, d.seduced);
+    b.lastSpawn = d.lastSpawn;
     b.mesh.scale.set(1, 1, 1);
     const bar = b.mesh.userData.bar; bar.userData.shown = b.hp / BANDIT.hp; bar.userData.fill.scale.x = Math.max(0.0001, BAR_W * b.hp / BANDIT.hp);
     return b;
@@ -3121,6 +3278,9 @@
       const b = bandits.find(q => q.id === d.id);
       if (!b) { banditFromData(d); return; }
       if (b.hp !== d.hp) { b.hp = d.hp; setBar(b.mesh.userData.bar, b.hp); }
+      if (b.x !== d.x || b.z !== d.z) { b.x = d.x; b.z = d.z; hop(b.mesh, posOf(d.x, d.z), 420, 0.25); }
+      if ((d.seduced ?? null) !== (b.seduced ?? null) && d.seduced != null) markSeduced(b, d.seduced);
+      b.lastSpawn = d.lastSpawn;
     });
     bandits.filter(b => !bseen.has(b.id)).forEach(b => { world.remove(b.mesh); removeTent(b); });
     bandits = bandits.filter(b => bseen.has(b.id));
@@ -3265,7 +3425,7 @@
   // attack bandits that threaten the settlement, with fighters first and peasants if needed
   async function aiFightBandits(token) {
     const hunters = mine().filter(u => !UNITS[u.kind].gathers && atkOf(u) > 0);
-    const threats = bandits.filter(b => dist(b, BASE) <= 8 || b.target === cp || mine().some(u => dist(u, b) <= 2) || hunters.some(u => dist(u, b) <= HUNT_RANGE))
+    const threats = bandits.filter(b => b.seduced !== cp).filter(b => dist(b, BASE) <= 8 || b.target === cp || mine().some(u => dist(u, b) <= 2) || hunters.some(u => dist(u, b) <= HUNT_RANGE))
       .sort((a, b) => a.hp - b.hp || dist(a, BASE) - dist(b, BASE));
     for (const b of threats) {
       if (!aiStillValid(token)) return;
@@ -3315,7 +3475,7 @@
     const planned = { food: 0, wood: 0, stone: 0, gold: 0 };   // expected income already assigned this turn
     // the next goal's food also has to leave enough for an upkeep afterwards
     const deficit = r => Math.max(0, (r === 'food' ? (cost.food ? cost.food + need + 2 : 0) : (cost[r] || 0)) - stock[r] - planned[r] * 3);
-    const danger = t => bandits.some(b => dist(b, t) <= 1);
+    const danger = t => bandits.some(b => b.seduced !== cp && dist(b, t) <= 1);
     const claimed = new Set();
     let foodPlanned = 0;
     // units already on a good food tile keep working it
@@ -3379,7 +3539,7 @@
       .sort((a, b) => (a.kind === 'wolf' ? 0 : 1) - (b.kind === 'wolf' ? 0 : 1));
     for (const u of hunters) {
       if (!aiStillValid(token)) return;
-      let prey = bandits.filter(b => dist(b, u) <= HUNT_RANGE).sort((a, b) => a.hp - b.hp || dist(a, u) - dist(b, u))[0];
+      let prey = bandits.filter(b => b.seduced !== cp && dist(b, u) <= HUNT_RANGE).sort((a, b) => a.hp - b.hp || dist(a, u) - dist(b, u))[0];
       if (!prey && u.kind === 'wolf') {   // no bandits around: raid rival peasants
         prey = units.filter(e => e.owner !== cp && e.kind === 'peasant' && players[e.owner] && players[e.owner].alive)
           .sort((a, b) => dist(a, u) - dist(b, u))[0];
@@ -3527,8 +3687,8 @@
         ev.text = 'A new forest grew on a meadow near your base.';
       } },
     { key: 'camp', good: false, title: 'Bandit tent', can: () => campSpots().length > 0, start(ev) {
-        const t = pickOne(campSpots()); const b = addBandit(t.x, t.z, false, null); makeCamp(b); ev.at = t;
-        ev.text = `Bandits pitched a tent near your base. Each turn it hits a unit next to it for ${BANDIT.atk}. Destroy it (${BANDIT.hp} HP) for a supply crate.`;
+        const t = pickOne(campSpots()); const b = addBandit(t.x, t.z, false, null); makeCamp(b); b.lastSpawn = turn; ev.at = t;
+        ev.text = `Bandits pitched a tent near your base. It hits a unit next to it for ${BANDIT.atk} each turn, and every ${CAMP_SPAWN_EVERY} rounds a bandit comes out of it. Destroy it (${BANDIT.hp} HP) for a supply crate.`;
       } },
     { key: 'fireForest', good: false, title: 'Burning forest', can: () => burnable('forest').length > 0, start(ev) {
         const t = pickOne(burnable('forest')); ignite(t); ev.at = t;

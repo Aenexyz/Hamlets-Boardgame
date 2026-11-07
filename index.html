@@ -510,7 +510,7 @@
     power:     { name: 'Power-up scroll', short: 'power-up scroll', special: 'power', use: 'Power up',   desc: 'The selected unit\'s next attack deals +3 damage. One use.' },
     horse:     { name: 'Horse',           short: 'horse',        special: 'horse', desc: 'Any unit can ride it: +3 movement, permanently.' },
     drug:      { name: 'Demon drug',      short: 'demon drug',   special: 'drug',  desc: 'The unit loses 1 HP but hits +2 harder until the end of this turn. Needs at least 2 HP. One use.' },
-    wornsword: { name: 'Worn-out short sword', short: 'worn-out short sword', special: 'wornsword', desc: '+1 attack for the unit holding it. Breaks after 3 attacks.' },
+    wornsword: { name: 'Worn-out short sword', short: 'worn-out short sword', special: 'wornsword', desc: '+1 attack on the next attack, then it breaks. One use.' },
     sword:     { name: 'Short sword',     short: 'short sword',  special: 'sword', desc: '+1 attack for the unit holding it. Never breaks.' },
     silveraxe: { name: 'Silver axe',      short: 'silver axe',   special: 'silver', tiles: ['forest'], where: 'a forest', desc: 'Never breaks: the peasant holding it always gathers twice on forests. Only one per settlement.' },
   };
@@ -520,7 +520,7 @@
     footman: { name: 'Footman', hp: 3, atk: 2, range: 1, moves: 3,                from: 'barracks', cost: { food: 3, wood: 2, stone: 2 } },
     archer:  { name: 'Archer',  hp: 2, atk: 1, range: 3, moves: 3,                from: 'barracks', cost: { food: 3, wood: 3, gold: 1 } },
     // Heroes: one per faction, never recruited
-    brena:   { name: 'Brena',   hero: true, hp: 3, atk: 1, range: 1, moves: 2, gathers: true, from: 'base', title: 'the Harvest Keeper' },
+    brena:   { name: 'Brena',   hero: true, hp: 3, atk: 1, range: 2, moves: 2, gathers: true, from: 'base', title: 'the Harvest Keeper' },
     fenric:  { name: 'Fenric',  hero: true, hp: 5, atk: 2, range: 1, moves: 2,                from: 'base', title: 'the Packlord' },
     nerissa: { name: 'Nerissa', hero: true, hp: 3, atk: 1, range: 1, moves: 3,                from: 'base', title: 'the Tidecaller' },
     grukk:   { name: 'Grukk',   hero: true, hp: 6, atk: 2, range: 1, moves: 2,                from: 'base', title: 'the Warchief' },
@@ -534,7 +534,7 @@
   const FACTIONS = {
     hearth: { name: 'Hearthfolk',         hero: 'brena',
               perks: 'Wheat fields give +1 food. Footmen cost 1 extra stone.',
-              heroText: 'Brena (3 HP, gathers). Peasants next to her never roll 0.',
+              heroText: 'Brena (3 HP, gathers, reach 2). Peasants next to her never roll 0.',
               ability: 'Harvest feast', abilityText: 'All your units skip upkeep this turn.' },
     wolf:   { name: 'Ironwood Wolfmen',   hero: 'fenric',
               perks: 'Forests never roll 0 wood. Riverbanks give 1 less food.',
@@ -606,7 +606,7 @@
     tower:  { name: 'Watchtower', cost: { wood: 5, stone: 3 } },
   };
   const WALL_HP = 5;
-  const TOWER_RANGE_BONUS = 2;   // archers on a watchtower shoot this much farther
+  const TOWER_RANGE_BONUS = 2;   // ranged units (archers, Brena) on a watchtower reach this much farther
   const BANDIT = { hp: 3, atk: 1 };
   const BANDIT_CHANCE = 0.025;   // per gathering peasant, per turn
   const BANDIT_GRACE = 3;        // no ambushes before this turn has passed
@@ -1965,7 +1965,7 @@
     });
     return out;
   }
-  const rangeOf = u => UNITS[u.kind].range + (u.kind === 'archer' && tileAt(u.x, u.z).type === 'tower' ? TOWER_RANGE_BONUS : 0) + (u.scope ? 2 : 0);
+  const rangeOf = u => UNITS[u.kind].range + (UNITS[u.kind].range > 1 && tileAt(u.x, u.z).type === 'tower' ? TOWER_RANGE_BONUS : 0) + (u.scope ? 2 : 0);
   const canReach = (u, e) => {
     const r = rangeOf(u), d = dist(u, e);
     if (d > r) return false;
@@ -2414,7 +2414,7 @@
     t.amount = 0; t.owner = cp; setTileType(t, p.kind);
     if (t.props) grow(t.props);
     undoStack.push({ type: 'struct', kind: p.kind, t, prev, cost: { ...cost } });
-    say(p.kind === 'bridge' ? 'Bridge built. Units can now cross here.' : `Watchtower built. An archer standing on it shoots ${UNITS.archer.range + TOWER_RANGE_BONUS} hexes.`);
+    say(p.kind === 'bridge' ? 'Bridge built. Units can now cross here.' : `Watchtower built. Archers and Brena standing on it get +${TOWER_RANGE_BONUS} range.`);
     selectNext(false);
   }
   // Every open hex edge where both sides lie within WALL_RANGE of the base
@@ -2490,7 +2490,7 @@
     [...(u.tools || [])].forEach(k => add(k, `Gathers twice on ${ITEMS[k].where} · one use`));
     if (u.silver) add('silveraxe', 'Always gathers twice on forests');
     if (u.sword) add('sword', '+1 attack');
-    if (u.wornSword > 0) add('wornsword', `+1 attack · ${u.wornSword} swing${u.wornSword > 1 ? 's' : ''} left`, { drop: u.wornSword < 3 });
+    if (u.wornSword > 0) add('wornsword', '+1 attack on the next attack · one use');
     if (u.armor) add('armor', '+2 max HP');
     if (u.scope) add('scope', '+2 range');
     if (u.bubble && u.shieldItem) add('shield', 'Blocks the next hit · one use');
@@ -2605,8 +2605,8 @@
       targets = inRange(u);
       say(`${label(u)} takes the demon drug: ${u.hp} HP, but hits for ${atkOf(u)} this turn.`);
     } else if (k === 'wornsword') {
-      u.wornSword = 3; targets = inRange(u);
-      say(`${label(u)} takes the worn-out short sword (+1 attack, 3 swings before it breaks).`);
+      u.wornSword = 1; targets = inRange(u);
+      say(`${label(u)} takes the worn-out short sword: +1 attack on its next attack, then it breaks.`);
     } else if (k === 'sword') {
       u.sword = true;
       say(`${label(u)} takes up the short sword and now hits for ${atkOf(u)}.`);
@@ -2629,7 +2629,7 @@
     if (['axe', 'sickle', 'pickaxe', 'pole'].includes(k)) u.tools.delete(k);
     else if (k === 'silveraxe') u.silver = false;
     else if (k === 'sword') u.sword = false;
-    else if (k === 'wornsword') { back = u.wornSword >= 3; u.wornSword = 0; }   // a sword that has been swung is too worn to keep
+    else if (k === 'wornsword') u.wornSword = 0;
     else if (k === 'armor') { u.armor = false; u.hp = Math.min(u.hp, maxHpU(u)); u.mesh.userData.bar.userData.max = maxHpU(u); setBar(u.mesh.userData.bar, u.hp); }
     else if (k === 'scope') u.scope = false;
     else if (k === 'shield') { u.bubble = false; u.shieldItem = false; }
@@ -2651,7 +2651,7 @@
   const UNIT_NOTES = {
     peasant: 'Gathers the tile it stands on at the start of your turn. Can fight in a pinch.',
     footman: 'Sturdy melee fighter.',
-    archer: 'Shoots from a distance. Gets +1 range on a watchtower and +2 with a scope.',
+    archer: `Shoots from a distance. Gets +${TOWER_RANGE_BONUS} range on a watchtower and +2 with a scope.`,
     wolf: "Tamed by Fenric. Never eats. Hits for 2 while next to him.",
     skeleton: 'Never eats. Can explode to hit every adjacent enemy for 1.',
     hunch: 'Enemies next to it must strike it first.',
@@ -4176,7 +4176,7 @@
   const STRUCT_TEXT = {
     bridge: ['Lets units cross the river.', 'Goes on a river hex next to any of your units.'],
     wall: [`Blocks movement across one hex edge. ${WALL_HP} HP: bandits must break it to reach units behind it.`, 'Goes on any hex edge within 4 hexes of your base. Build several in one action.'],
-    tower: [`Archers standing on it shoot ${UNITS.archer.range + TOWER_RANGE_BONUS} hexes instead of ${UNITS.archer.range}.`, `Goes on a free hex within ${BUILD_RANGE} hexes of your base.`],
+    tower: [`+${TOWER_RANGE_BONUS} range for ranged units on it: archers shoot ${UNITS.archer.range + TOWER_RANGE_BONUS} hexes instead of ${UNITS.archer.range}, Brena reaches ${UNITS.brena.range + TOWER_RANGE_BONUS}.`, `Goes on a free hex within ${BUILD_RANGE} hexes of your base.`],
   };
   function structRow(kind) {
     const why = structBlock(kind);
@@ -4409,8 +4409,8 @@
       if (selected.power) tags.push(`powered up +${selected.power}`);
       if (selected.horse) tags.push('on horseback');
       if (selected.drug) tags.push('demon drug');
-      if (selected.wornSword) tags.push(`worn sword (${selected.wornSword} swings left)`);
-      if (rangeOf(selected) > UNITS[selected.kind].range) tags.push(`on watchtower, reach ${rangeOf(selected)}`);
+      if (selected.wornSword) tags.push('worn sword (breaks after its next hit)');
+      if (tileAt(selected.x, selected.z).type === 'tower' && UNITS[selected.kind].range > 1) tags.push(`on watchtower, reach ${rangeOf(selected)}`);
       if (selected.hungry) tags.push('hungry');
       if (selected.tools.size) tags.push('carrying ' + [...selected.tools].map(k => ITEMS[k].short).join(', '));
       if (selected.silver) tags.push('silver axe');
@@ -4444,7 +4444,7 @@
       barracks: t.owner === cp ? 'Your barracks · footmen and archers are recruited here' : `${players[t.owner] ? players[t.owner].name : 'Someone'}'s barracks`,
       shore: 'Bare shore · fished out',
       water: 'River · a peasant can build a bridge here', bridge: 'Bridge · built by your peasants', meadow: 'Meadow · nothing to gather',
-      tower: `Watchtower · archers here shoot ${UNITS.archer.range + TOWER_RANGE_BONUS} hexes`,
+      tower: `Watchtower · +${TOWER_RANGE_BONUS} range for archers and Brena standing here`,
     }[t.type];
     const tb = YIELD[t.type];
     return `${ty.name} · ${t.amount} ${RES_LABEL[ty.res].toLowerCase()} left · ${tb[0][0]}–${tb[tb.length - 1][0]} per turn`;

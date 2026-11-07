@@ -484,8 +484,8 @@
   const TRADES = [
     { name: 'Sack of grain',  give: { gold: 2 }, get: { food: 5 } },
     { name: 'Wheat seeds',    give: { gold: 2 }, get: {}, items: { seed: 5 } },
-    { name: 'Bundle of logs', give: { gold: 1 }, get: { wood: 3 } },
-    { name: 'Cut stone',      give: { gold: 2 }, get: { stone: 3 } },
+    { name: 'Bundle of logs', give: { gold: 2 }, get: { wood: 5 } },
+    { name: 'Cut stone',      give: { gold: 2 }, get: { stone: 5 } },
     { name: 'Supply crate',   give: { gold: 2 }, get: { food: 3, wood: 2, stone: 1 } },
     { name: 'Food crate',     give: { gold: 10 }, get: {}, items: { crate: 1 } },
   ];
@@ -526,7 +526,7 @@
     grukk:   { name: 'Grukk',   hero: true, hp: 6, atk: 2, range: 1, moves: 2,                from: 'base', title: 'the Warchief' },
     durnik:  { name: 'Durnik',  hero: true, hp: 4, atk: 2, range: 1, moves: 2, gathers: true, from: 'base', title: 'the Vein Seeker' },
     // Summons
-    wolf:    { name: 'Wolf',      hp: 1, atk: 1, range: 1, moves: 3, noFood: true, summon: true, from: 'base' },
+    wolf:    { name: 'Wolf',      hp: 1, atk: 1, range: 1, moves: 4, noFood: true, summon: true, from: 'base' },
     skeleton:{ name: 'Skeleton',  hp: 1, atk: 1, range: 1, moves: 3, noFood: true, summon: true, explodes: true, from: 'base' },
     hunch:   { name: 'Hunchback', hp: 2, atk: 0, range: 1, moves: 2, taunt: true,  summon: true, from: 'base' },
     totem:   { name: 'Healing totem', hp: 3, atk: 0, range: 0, moves: 0, noFood: true, summon: true, totem: true, from: 'base' },
@@ -539,7 +539,7 @@
     wolf:   { name: 'Ironwood Wolfmen',   hero: 'fenric',
               perks: 'Forests never roll 0 wood. Riverbanks give 1 less food.',
               heroText: 'Fenric (5 HP, hits 2). Wolves next to him hit for 2.',
-              ability: 'Tame wolf', abilityText: 'A wolf (1 HP, hits 1, moves 3, never eats) joins next to Fenric. Up to 3.' },
+              ability: 'Tame wolf', abilityText: 'A wolf (1 HP, hits 1, moves 4, never eats) joins next to Fenric. Up to 3. Wolves carry no items, but can take demon drugs and scrolls.' },
     mer:    { name: 'Merfolk',            hero: 'nerissa',
               perks: 'River merchants appear twice as often. Bridges cost half.',
               heroText: 'Nerissa (3 HP, moves 3). Bandits next to her don\'t attack or steal.',
@@ -2483,10 +2483,11 @@
   }
   // ---------- What a unit carries ----------
   const FREE_ITEMS = ['horse', 'drug'];   // horses and demon drugs don't take up a slot
-  const capOf = u => UNITS[u.kind].hero ? Infinity : UNITS[u.kind].totem ? 0 : u.kind === 'peasant' ? 2 : 4;
+  const WOLF_OK = ['drug', 'shield', 'power'];   // wolves carry nothing, but can take a demon drug or a scroll
+  const capOf = u => UNITS[u.kind].hero ? Infinity : UNITS[u.kind].totem || u.kind === 'wolf' ? 0 : u.kind === 'peasant' ? 2 : 4;
   function gearOf(u) {
     const g = [];
-    const add = (k, note, extra = {}) => g.push({ k, name: ITEMS[k].name, note, counts: !FREE_ITEMS.includes(k), removable: true, ...extra });
+    const add = (k, note, extra = {}) => g.push({ k, name: ITEMS[k].name, note, counts: !FREE_ITEMS.includes(k) && u.kind !== 'wolf', removable: true, ...extra });
     [...(u.tools || [])].forEach(k => add(k, `Gathers twice on ${ITEMS[k].where} · one use`));
     if (u.silver) add('silveraxe', 'Always gathers twice on forests');
     if (u.sword) add('sword', '+1 attack');
@@ -2512,7 +2513,8 @@
     if (k === 'crate') return !P().feast;
     if (!selected) return false;
     if (UNITS[selected.kind].totem) return false;
-    if (!FREE_ITEMS.includes(k) && slotsFull(selected)) return false;   // no free slot
+    if (selected.kind === 'wolf' && !WOLF_OK.includes(k)) return false;
+    if (!FREE_ITEMS.includes(k) && selected.kind !== 'wolf' && slotsFull(selected)) return false;   // no free slot
     if ((k === 'sword' || k === 'wornsword') && selected.kind === 'archer') return false;   // archers can't wield short swords
     if (k === 'scope') return selected.kind === 'archer' && !selected.scope;
     if (k === 'armor') return !selected.armor;
@@ -2652,7 +2654,7 @@
     peasant: 'Gathers the tile it stands on at the start of your turn. Can fight in a pinch.',
     footman: 'Sturdy melee fighter.',
     archer: `Shoots from a distance. Gets +${TOWER_RANGE_BONUS} range on a watchtower and +2 with a scope.`,
-    wolf: "Tamed by Fenric. Never eats. Hits for 2 while next to him.",
+    wolf: "Tamed by Fenric. Never eats. Hits for 2 while next to him. Can't hold items, but can take demon drugs and shield or power-up scrolls.",
     skeleton: 'Never eats. Can explode to hit every adjacent enemy for 1.',
     hunch: 'Enemies next to it must strike it first.',
     totem: `Heals your units within ${2} hexes for 2 HP each turn. Units in range never go hungry or starve.`,
@@ -2703,11 +2705,11 @@
     // items
     const gear = gearOf(u), cap = capOf(u);
     let itemsHtml = '';
-    if (cap > 0 || gear.length) {
+    if (cap > 0 || gear.length || u.kind === 'wolf') {
       const used = gear.filter(i => i.counts).length;
-      itemsHtml = `<div class="uc-sec"><h4><span>Items</span><span>${cap === Infinity ? `${used} · no limit` : `${used}/${cap}`}</span></h4>` +
+      itemsHtml = `<div class="uc-sec"><h4><span>${u.kind === 'wolf' ? 'Effects' : 'Items'}</span><span>${u.kind === 'wolf' ? 'no items' : cap === Infinity ? `${used} · no limit` : `${used}/${cap}`}</span></h4>` +
         (gear.length ? gear.map(i => `<div class="uc-item"><div><b>${esc(i.name)}</b><small>${esc(i.note)}</small></div>${own ? (i.removable ? `<button data-rm="${i.k}" title="${i.drop ? 'Throw it away' : 'Put it back in your inventory'}">${i.drop ? 'Drop' : 'Remove'}</button>` : `<small title="${esc(i.why || '')}">${esc(i.why || '')}</small>`) : ''}</div>`).join('')
-          : `<p class="uc-empty">${own ? 'Holding nothing. Give it items from the Inventory.' : 'Holding nothing.'}</p>`) +
+          : `<p class="uc-empty">${u.kind === 'wolf' ? 'Wolves carry nothing, but can take a demon drug or a shield or power-up scroll.' : own ? 'Holding nothing. Give it items from the Inventory.' : 'Holding nothing.'}</p>`) +
         `${cap !== Infinity && cap > 0 ? '<p class="uc-empty" style="margin-top:6px">Horses and demon drugs don\'t use a slot.</p>' : ''}</div>`;
     }
     $('ucBody').innerHTML = (tags.length ? `<div class="uc-tags">${tags.map(([c, t]) => `<span class="uc-tag ${c}">${esc(t)}</span>`).join('')}</div>` : '') + skills + itemsHtml;
@@ -3844,7 +3846,7 @@
       s.moved = true; s.done = true;
       s.mesh.scale.set(0.01, 0.01, 0.01);
       tween(400, (k, e) => { const v = 0.01 + 0.99 * e; s.mesh.scale.set(v, v, v); });
-      say(`Fenric tamed ${label(s)}. It moves 3, never eats, and hits for 2 beside him.`);
+      say(`Fenric tamed ${label(s)}. It moves ${UNITS.wolf.moves}, never eats, and hits for 2 beside him.`);
     } else if (f === 'mer') {
       const u = pickOne(mine().filter(q => !q.bubble));
       u.bubble = true;
@@ -3872,6 +3874,7 @@
     const u = selected;
     if (u) {
       if (UNITS[u.kind].totem) return "The totem can't hold items.";
+      if (u.kind === 'wolf' && !WOLF_OK.includes(k)) return "Wolves can't hold items. They can only take a demon drug or a shield or power-up scroll.";
       if ((k === 'sword' || k === 'wornsword') && u.kind === 'archer') return "Archers can't use a short sword.";
       if (!FREE_ITEMS.includes(k) && slotsFull(u)) return `${label(u)} can't carry more (${slotsUsed(u)}/${capOf(u)} items). Remove one first.`;
       const has = { sword: u.sword || u.wornSword, wornsword: u.sword || u.wornSword, armor: u.armor, scope: u.scope, shield: u.bubble, power: u.power, silveraxe: u.silver || u.tools.has('axe'), axe: u.tools.has('axe') || u.silver, boots: u.extraMoves, horse: u.horse, drug: u.drug }[k] || (u.tools && u.tools.has(k));

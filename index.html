@@ -384,7 +384,7 @@
         <span><i class="sw" style="background:#c9b98a"></i>Riverbank → 0–4 food, plus river finds</span>
       </div>
       <p>On an island in the middle of the river sits a <b>bandit lair</b> (8 HP), ringed by bone-strewn grounds you can cross at your own risk. Its guards don't steal, but they hit anyone who comes close, and a new one comes out every 3 turns. The lair also hurls spears at up to 2 units within 2 hexes each turn, for 2 damage. Destroy it for its hoard. After that, a bandit tent pops up on a meadow within 6 hexes of the old lair every 10 player turns. Tents don't move or steal, but a bandit walks out of each one every 3 rounds.</p>
-      <p><b>Turn events</b> strike every 4th turn of each player: a wandering peasant, a dwarf mason, a travelling merchant, a bountiful harvest, new wheat or forest, a pot of gold, or trouble such as a bandit tent or a fire.</p>
+      <p><b>Turn events</b> strike every 4th turn of each player: a wandering peasant, a dwarf mason, a travelling merchant, a black market, a bountiful harvest, new wheat or forest, a pot of gold, or trouble such as a bandit tent or a fire.</p>
       <p>Roaming bandits walk up to 2 hexes a round toward the nearest base, and rob any base within 8 hexes of them of 1 food and 1 other resource each turn. Lair guards stay put. Nerissa calms bandits and lair guards within 3 hexes, and may seduce them (guards included) into raiding her rivals.</p>
       <p>Bandits have 3 HP. When killed they drop gold, a worn-out tool, a demon drug or a shield scroll, plus 1–6 wheat seeds. A farm harvest saves a seed half the time. Build a barracks to train footmen (3 HP, hit for 2) and archers (shoot 3 tiles away).</p>
       </details>
@@ -539,9 +539,19 @@
     drug:      { name: 'Demon drug',      short: 'demon drug',   special: 'drug',  desc: 'The unit loses 1 HP but hits +2 harder until the end of this turn. Needs at least 2 HP. One use.' },
     wornsword: { name: 'Worn-out short sword', short: 'worn-out short sword', special: 'wornsword', desc: '+1 attack on the next attack, then it breaks. One use.' },
     sword:     { name: 'Short sword',     short: 'short sword',  special: 'sword', desc: '+1 attack for the unit holding it. Never breaks.' },
+    speeddrug: { name: 'Speed drug',      short: 'speed drug',   special: 'speeddrug', desc: 'This turn the unit attacks twice, but its base movement drops to 1. One use.' },
+    gloves:    { name: 'Quick gloves',    short: 'quick gloves', special: 'gloves', desc: 'The unit attacks twice every turn, permanently.' },
+    ironpick:  { name: 'Iron pickaxe',    short: 'iron pickaxe', special: 'iron', tiles: ['quarry', 'mine'], where: 'quarries and gold veins', desc: 'Never breaks: always gathers twice on quarries and gold veins. Lets any hero gather there too.' },
+    ironaxe:   { name: 'Iron axe',        short: 'iron axe',     special: 'iron', tiles: ['forest'], where: 'forests', desc: 'Never breaks: always gathers twice on forests. Lets any hero gather there too.' },
+    ironrod:   { name: 'Sturdy fishing rod', short: 'sturdy fishing rod', special: 'iron', tiles: ['bank'], where: 'riverbanks', desc: 'Never breaks: always gathers twice on riverbanks. Lets any hero gather there too.' },
+    ironsickle:{ name: 'Iron sickle',     short: 'iron sickle',  special: 'iron', tiles: ['field'], where: 'wheat fields', desc: 'Never breaks: always gathers twice on wheat fields. Lets any hero gather there too.' },
     silveraxe: { name: 'Silver axe',      short: 'silver axe',   special: 'silver', tiles: ['forest'], where: 'a forest', desc: 'Never breaks: the peasant holding it always gathers twice on forests. Only one per settlement.' },
   };
   const DROP_TOOLS = ['axe', 'sickle', 'pickaxe', 'pole', 'boots'];
+  const IRON = ['ironpick', 'ironaxe', 'ironrod', 'ironsickle'];
+  // the black market: what it can stock, and the price in gold
+  const MARKET_GOODS = { drug: 3, shield: 4, skeleton: 4, speeddrug: 6, power: 5, gloves: 30, ironpick: 12, ironaxe: 10, ironrod: 10, ironsickle: 10 };
+  const MARKET_OFFERS = 5;
   const UNITS = {
     peasant: { name: 'Peasant', hp: 1, atk: 1, range: 1, moves: 2, gathers: true, from: 'base',     cost: { food: 3, wood: 2 } },
     footman: { name: 'Footman', hp: 3, atk: 2, range: 1, moves: 3,                from: 'barracks', cost: { food: 3, wood: 2, stone: 2 } },
@@ -1360,7 +1370,7 @@
   let tiles, units, bandits, stock, items, turn, phase, selected, busy, nextId, placing, barracks, lair, walls = new Map(), ghosts = [], mines = new Map(), reportResume = false;
   let players = [], cp = 0, playerCount = 1;
   let tentClock = 0;   // player turns since the last bandit tent (counts only once the lair has fallen)
-  let curEvent = null, pots = [], fires = [], lastEvent = null;   // this turn's event, pots of gold on the map, burning tiles
+  let curEvent = null, pots = [], fires = [], lastEvent = null, markets = [];   // this turn's event, pots of gold on the map, burning tiles
   let timers = [], undoStack = [], moves = new Map(), targets = [], buildSpots = new Set(), turnLog = [];
   // odd-r offset coords -> cube coords for distance
   const cube = t => { const q = t.x - (t.z - (t.z & 1)) / 2; return [q, t.z, -q - t.z]; };
@@ -1489,7 +1499,7 @@
     timers.forEach(clearTimeout); timers = []; tweens.length = 0;
     while (world.children.length) { const c = world.children[0]; world.remove(c); if (c.geometry && c.geometry !== tileGeo && c.geometry !== waterGeo) c.geometry.dispose(); }
     movingUnit = null; closePopup(); aiToken++; aiRunning = false;
-    tiles = []; units = []; bandits = []; selected = null; busy = false; turn = 1; nextId = 1; tentClock = 0; curEvent = null; pots = []; fires = []; lastEvent = null; placing = false; barracks = null; lair = null; walls = new Map(); ghosts = []; mines = new Map(); reportResume = false;
+    tiles = []; units = []; bandits = []; selected = null; busy = false; turn = 1; nextId = 1; tentClock = 0; curEvent = null; pots = []; fires = []; lastEvent = null; markets = []; placing = false; barracks = null; lair = null; walls = new Map(); ghosts = []; mines = new Map(); reportResume = false;
     undoStack = []; moves = new Map(); targets = []; buildSpots = new Set();
     setCurrent(0);
     const types = generateTypes();
@@ -1794,6 +1804,7 @@
   function startTurn() {
     phase = 'gather'; busy = true; selected = null; moves = new Map(); targets = []; refreshMarkers(); updateHUD();
     burnOut();
+    closeMarkets();
     curEvent = turn > 1 && turn % EVENT_EVERY === 0 ? rollTurnEvent() : null;
     const { report, got } = gatherAll(false);
     tickTotems(report);
@@ -1828,7 +1839,8 @@
     const ambushOK = turn > BANDIT_GRACE;
     mine().forEach(u => {
       if (turn === 1 && !bonusPass) return;   // nobody has worked yet: everyone starts with exactly the starting stock
-      if (!UNITS[u.kind].gathers) return;
+      const ironHere = [...(u.irons || [])].find(k => ITEMS[k].tiles.includes(tileAt(u.x, u.z).type));
+      if (!UNITS[u.kind].gathers && !(UNITS[u.kind].hero && ironHere)) return;   // iron tools let any hero gather on their tiles
       const t = tileAt(u.x, u.z), ty = TYPES[t.type];
       const entry = { who: label(u), type: t.type, name: ty.name, res: ty.res, n: 0, notes: [] };
       report.push(entry);
@@ -1864,11 +1876,13 @@
       let left = t.amount - work;
       const extra = boosted ? Math.min(rollFor(type, u), left) : 0; left -= extra;
       const sx = silver ? Math.min(rollFor(type, u), left) : 0; left -= sx;
+      const ix = ironHere ? Math.min(rollFor(type, u), left) : 0; left -= ix;
       const dx = delve ? Math.min(rollFor(type, u), left) : 0;
-      const n = work + extra + sx + dx;
+      const n = work + extra + sx + ix + dx;
       entry.n = n;
       const rl = RES_LABEL[ty.res];
-      if (boosted || silver || delve) entry.notes.push({ cls: 'split', text: `Regular work: +${work} ${rl}` });
+      if (boosted || silver || ironHere || delve) entry.notes.push({ cls: 'split', text: `Regular work: +${work} ${rl}` });
+      if (ironHere) { entry.notes.push({ cls: 'tool', text: `${ITEMS[ironHere].name}: +${ix} ${rl}${ix === 0 ? ' (no luck)' : ''}.` }); if (ix > 0) floatAt(u.mesh.position, `${ITEMS[ironHere].name}: +${ix}`, '#d8dde3', 1.3, 350); }
       if (delve) entry.notes.push({ cls: 'tool', text: `Durnik digs again: +${dx} ${rl}.` });
       if (boosted) {
         entry.notes.push({ cls: 'tool', text: `${ITEMS[toolKey].name}: +${extra} ${rl}${extra === 0 ? ' (no luck)' : ''}. The ${ITEMS[toolKey].short} broke.` });
@@ -2000,14 +2014,15 @@
         say(`${UNITS[kind].name} has returned to the base (${HERO_REVIVE_GOLD} gold).`);
       } else say(`${UNITS[kind].name} is ready to return but needs ${HERO_REVIVE_GOLD} gold and a free hex at the base.`);
     }
-    mine().forEach(u => { u.moved = false; u.done = !!UNITS[u.kind].totem; u.extraMoves = 0; if (!extra) u.drug = false; });   // totems never move
+    mine().forEach(u => { u.moved = false; u.done = !!UNITS[u.kind].totem; u.extraMoves = 0; u.secondSwing = false; if (!extra) { u.drug = false; u.speedDrug = false; } });   // totems never move
     selectNext(true);
     updateHUD();
     if (P().ai) runAI();
   }
 
+  const movesOf = u => (u.speedDrug ? 1 : UNITS[u.kind].moves) + (u.extraMoves || 0) + (u.horse ? 3 : 0);   // the speed drug cuts base movement to 1
   function reachable(u) {
-    const steps = UNITS[u.kind].moves + (u.extraMoves || 0) + (u.horse ? 3 : 0);
+    const steps = movesOf(u);
     const start = tileAt(u.x, u.z);
     const prev = new Map([[start, null]]);
     let frontier = [start];
@@ -2104,6 +2119,14 @@
       if (powered) u.power = 0;
       if (u.wornSword > 0 && --u.wornSword === 0) { floatAt(u.mesh.position, 'Sword broke', '#a59d8b', 1.3, 300); say(`${document.getElementById('log').textContent} ${label(u)}'s worn-out short sword broke.`); }
       busy = false;
+      // quick gloves or the speed drug: one more attack this turn (no more moving)
+      if ((u.gloves || u.speedDrug) && !u.secondSwing && units.includes(u) && !P().ai) {
+        u.secondSwing = true; u.done = false;
+        floatAt(u.mesh.position, 'Attack again!', '#f3e6c4', 1.25, 300);
+        say(`${document.getElementById('log').textContent} ${label(u)} can attack once more.`);
+        later(() => { if (phase === 'move' && !busy) { select(u, false); if (!targets.length) say(`${label(u)} can attack once more, but nothing is in reach. Press Hold to finish.`); } }, 250);
+        return updateHUD();
+      }
       later(() => { if (phase === 'move' && !busy && !selected) selectNext(false); }, 250);
       updateHUD();
     };
@@ -2666,14 +2689,17 @@
     return new Set(tiles.filter(t => dist(t, BASE) <= MINE_RANGE && walkable(t) && !occupied(t) && !mines.has(`${t.x},${t.z}`) && !['base', 'barracks', 'farm', 'smith', 'wizard', 'tower'].includes(t.type)));
   }
   // ---------- What a unit carries ----------
-  const FREE_ITEMS = ['horse', 'drug'];   // horses and demon drugs don't take up a slot
-  const WOLF_OK = ['drug', 'shield', 'power'];   // wolves carry nothing, but can take a demon drug or a scroll
+  const FREE_ITEMS = ['horse', 'drug', 'speeddrug'];   // horses and drugs don't take up a slot
+  const WOLF_OK = ['drug', 'speeddrug', 'shield', 'power'];   // wolves carry nothing, but can take a demon drug or a scroll
   const capOf = u => UNITS[u.kind].hero ? Infinity : UNITS[u.kind].totem || u.kind === 'wolf' ? 0 : u.kind === 'peasant' ? 2 : 4;
   function gearOf(u) {
     const g = [];
     const add = (k, note, extra = {}) => g.push({ k, name: ITEMS[k].name, note, counts: !FREE_ITEMS.includes(k) && u.kind !== 'wolf', removable: true, ...extra });
     [...(u.tools || [])].forEach(k => add(k, `Gathers twice on ${ITEMS[k].where} · one use`));
     if (u.silver) add('silveraxe', 'Always gathers twice on forests');
+    [...(u.irons || [])].forEach(k => add(k, `Always gathers twice on ${ITEMS[k].where}${UNITS[u.kind].gathers ? '' : ' · lets this hero gather there'}`));
+    if (u.gloves) add('gloves', 'Attacks twice every turn');
+    if (u.speedDrug) add('speeddrug', 'Attacks twice this turn · base moves 1 · doesn\'t use a slot', { removable: false, why: 'Already taken.' });
     if (u.sword) add('sword', '+1 attack');
     if (u.wornSword > 0) add('wornsword', '+1 attack on the next attack · one use');
     if (u.armor) add('armor', '+2 max HP');
@@ -2685,6 +2711,8 @@
     if (u.drug) add('drug', '+2 attack this turn · doesn\'t use a slot', { removable: false, why: 'Already taken.' });
     return g;
   }
+  const toolTiles = k => ITEMS[k].tiles || [];
+  const hasToolFor = (u, k) => toolTiles(k).some(ty => [...(u.tools || [])].some(t => toolTiles(t).includes(ty)) || (u.silver && toolTiles('silveraxe').includes(ty)) || [...(u.irons || [])].some(t => toolTiles(t).includes(ty)));
   const slotsUsed = u => gearOf(u).filter(i => i.counts).length;
   const slotsFull = u => slotsUsed(u) >= capOf(u);
   function canUse(k) {
@@ -2709,7 +2737,12 @@
     if (k === 'wornsword') return !selected.sword && !selected.wornSword;   // one sword at a time
     if (k === 'horse') return !selected.horse;
     if (k === 'drug') return !selected.drug && selected.hp >= 2;
+    if (k === 'speeddrug') return !selected.speedDrug;
+    if (k === 'gloves') return !selected.gloves;
+    if ((k === 'pickaxe' || k === 'ironpick') && selected.kind === 'durnik') return false;   // Durnik won't touch a pickaxe
+    if (IRON.includes(k)) return (UNITS[selected.kind].gathers || !!UNITS[selected.kind].hero) && !hasToolFor(selected, k);
     if (!UNITS[selected.kind].gathers) return false;
+    if (hasToolFor(selected, k)) return false;
     if (k === 'silveraxe') return !selected.silver && !selected.tools.has('axe');   // one axe at a time
     if (k === 'axe' && selected.silver) return false;
     return !selected.tools.has(k);   // one of each item
@@ -2796,6 +2829,17 @@
     } else if (k === 'sword') {
       u.sword = true;
       say(`${label(u)} takes up the short sword and now hits for ${atkOf(u)}.`);
+    } else if (k === 'speeddrug') {
+      u.speedDrug = true;
+      if (!u.moved) moves = reachable(u);
+      targets = atkOf(u) > 0 ? inRange(u) : [];
+      say(`${label(u)} takes the speed drug: it can attack twice this turn, but only moves ${movesOf(u)}.`);
+    } else if (k === 'gloves') {
+      u.gloves = true;
+      say(`${label(u)} pulls on the quick gloves: it now attacks twice every turn.`);
+    } else if (IRON.includes(k)) {
+      (u.irons || (u.irons = new Set())).add(k);
+      say(`${label(u)} now carries the ${ITEMS[k].short}. It never breaks: they gather twice on ${ITEMS[k].where}${UNITS[u.kind].gathers ? '' : ', and can now gather there'}.`);
     } else if (k === 'silveraxe') {
       u.silver = true;
       say(`${label(u)} now carries the silver axe. It never breaks: they gather twice on every forest.`);
@@ -2818,6 +2862,8 @@
     else if (k === 'wornsword') u.wornSword = 0;
     else if (k === 'armor') { u.armor = false; u.hp = Math.min(u.hp, maxHpU(u)); u.mesh.userData.bar.userData.max = maxHpU(u); setBar(u.mesh.userData.bar, u.hp); }
     else if (k === 'scope') u.scope = false;
+    else if (k === 'gloves') u.gloves = false;
+    else if (IRON.includes(k)) { if (u.irons) u.irons.delete(k); }
     else if (k === 'shield') { u.bubble = false; u.shieldItem = false; }
     else if (k === 'power') u.power = 0;
     else if (k === 'boots') u.extraMoves = 0;
@@ -2856,8 +2902,8 @@
     $('ucSub').textContent = `${def.hero ? 'Hero' : def.name} · ${pl.name}${fdef ? ` · ${fdef.name}` : ''}${u.owner === cp ? '' : ' (rival)'}`;
     // stats
     const mx = maxHpU(u), atk = atkOf(u), base = def.atk;
-    const mv = def.moves + (u.horse ? 3 : 0) + (u.extraMoves || 0);
-    const mvBits = [u.horse && '+3 horse', u.extraMoves && `+${u.extraMoves} boots`].filter(Boolean).join(' ');
+    const mv = movesOf(u);
+    const mvBits = [u.speedDrug && 'speed drug: base 1', u.horse && '+3 horse', u.extraMoves && `+${u.extraMoves} boots`].filter(Boolean).join(' ');
     const atkBits = [u.sword && '+1 sword', u.wornSword > 0 && '+1 worn sword', u.drug && '+2 drug', u.power && `+${u.power} power`, u.kind === 'wolf' && atk - base - (u.sword ? 1 : 0) - (u.wornSword > 0 ? 1 : 0) - (u.drug ? 2 : 0) - (u.power || 0) > 0 && '+1 Fenric'].filter(Boolean).join(' ');
     const rng = rangeOf(u);
     $('ucStats').innerHTML =
@@ -2874,6 +2920,7 @@
     if (u.bubble) tags.push(['good', u.shieldItem ? 'Shielded' : 'Water bubble']);
     if (u.power) tags.push(['good', `Powered up (+${u.power})`]);
     if (u.drug) tags.push(['bad', 'Drugged this turn']);
+    if (u.gloves || u.speedDrug) tags.push(['good', u.secondSwing ? 'Second attack ready' : 'Attacks twice']);
     if (u.owner === cp && phase === 'move') tags.push(['', u.done ? 'Done this turn' : u.moved ? 'Has moved' : 'Ready']);
     if (UNITS[u.kind].totem) tags.push(['', `${Math.max(0, u.life || 0) + 1} turn${(u.life || 0) ? 's' : ''} left`]);
     // skills
@@ -3139,10 +3186,11 @@
       })),
       tiles: tiles.map(t => [t.type, t.amount, t.max, t.owner == null ? -1 : t.owner, t.crops ? t.crops.map(c => c.planted) : null, t.burn ? [t.burn.by, t.burn.at] : 0]),
       units: units.map(u => ({ id: u.id, owner: u.owner, kind: u.kind, num: u.num, x: u.x, z: u.z, hp: u.hp, moved: u.moved, done: u.done, hungry: u.hungry,
-        tools: [...u.tools], silver: !!u.silver, sword: !!u.sword, wornSword: u.wornSword || 0, armor: !!u.armor, scope: !!u.scope, horse: !!u.horse,
+        tools: [...u.tools], irons: [...(u.irons || [])], gloves: !!u.gloves, speedDrug: !!u.speedDrug, secondSwing: !!u.secondSwing, silver: !!u.silver, sword: !!u.sword, wornSword: u.wornSword || 0, armor: !!u.armor, scope: !!u.scope, horse: !!u.horse,
         bubble: !!u.bubble, shieldItem: !!u.shieldItem, power: u.power || 0, drug: !!u.drug, fought: !!u.fought, extraMoves: u.extraMoves || 0, life: u.life || 0, rot: u.mesh.rotation.y })),
       bandits: bandits.map(b => ({ id: b.id, x: b.x, z: b.z, hp: b.hp, guard: b.guard, target: b.target, tent: !!b.tent, camp: !!b.camp, seduced: b.seduced == null ? null : b.seduced, lastSpawn: b.lastSpawn == null ? null : b.lastSpawn })),
       pots: pots.map(q => [q.x, q.z]),
+      markets: markets.map(m => ({ id: m.id, x: m.x, z: m.z, owner: m.owner, offers: m.offers })),
       event: lastEvent,
       tentClock,
       lair: lair ? { hp: lair.hp, alive: lair.alive } : null,
@@ -3170,7 +3218,7 @@
   // ----- rebuild or update the board from a snapshot -----
   function unitFromData(d) {
     const u = { id: d.id, owner: d.owner, kind: d.kind, num: d.num, x: d.x, z: d.z, hp: d.hp, moved: d.moved, done: d.done, hungry: d.hungry,
-      tools: new Set(d.tools || []), silver: d.silver, sword: d.sword, wornSword: d.wornSword, armor: d.armor, scope: d.scope, horse: d.horse,
+      tools: new Set(d.tools || []), irons: new Set(d.irons || []), gloves: !!d.gloves, speedDrug: !!d.speedDrug, secondSwing: !!d.secondSwing, silver: d.silver, sword: d.sword, wornSword: d.wornSword, armor: d.armor, scope: d.scope, horse: d.horse,
       bubble: d.bubble, shieldItem: !!d.shieldItem, power: d.power, drug: d.drug, fought: d.fought, extraMoves: d.extraMoves, life: d.life || 0 };
     u.mesh = makeUnit(d.kind, d.owner);
     u.mesh.traverse(o => { o.userData.unitId = u.id; });
@@ -3230,7 +3278,7 @@
     timers.forEach(clearTimeout); timers = []; tweens.length = 0;
     while (world.children.length) { const c = world.children[0]; world.remove(c); if (c.geometry && c.geometry !== tileGeo && c.geometry !== waterGeo) c.geometry.dispose(); }
     movingUnit = null; closePopup(); aiToken++; aiRunning = false;
-    tiles = []; units = []; bandits = []; selected = null; busy = false; placing = false; lair = null; pots = []; fires = []; walls = new Map(); ghosts = []; mines = new Map(); reportResume = false;
+    tiles = []; units = []; bandits = []; selected = null; busy = false; placing = false; lair = null; pots = []; fires = []; markets = []; walls = new Map(); ghosts = []; mines = new Map(); reportResume = false;
     undoStack = []; moves = new Map(); targets = []; buildSpots = new Set();
     s.tiles.forEach((d, i) => {
       const x = i % N, z = Math.floor(i / N), ty = d[0];
@@ -3292,7 +3340,7 @@
       if (!u) { u = unitFromData(d); return; }
       if (u.x !== d.x || u.z !== d.z) { u.x = d.x; u.z = d.z; hop(u.mesh, posOf(d.x, d.z), 320, 0.3); }
       const hadArmor = u.armor;
-      Object.assign(u, { hp: d.hp, moved: d.moved, done: d.done, hungry: d.hungry, silver: d.silver, sword: d.sword, wornSword: d.wornSword, armor: d.armor, scope: d.scope,
+      Object.assign(u, { hp: d.hp, moved: d.moved, done: d.done, hungry: d.hungry, irons: new Set(d.irons || []), gloves: !!d.gloves, speedDrug: !!d.speedDrug, secondSwing: !!d.secondSwing, silver: d.silver, sword: d.sword, wornSword: d.wornSword, armor: d.armor, scope: d.scope,
         bubble: d.bubble, shieldItem: !!d.shieldItem, power: d.power, drug: d.drug, fought: d.fought, extraMoves: d.extraMoves, life: d.life || 0, tools: new Set(d.tools || []) });
       if (d.horse && !u.horse) { u.horse = true; addHorse(u); }
       if (hadArmor !== u.armor) u.mesh.userData.bar.userData.max = maxHpU(u);
@@ -3728,6 +3776,10 @@
         const t = pickOne(burnable('field')); ignite(t); ev.at = t;
         ev.text = "A wheat field near your base caught fire. It can't be gathered this turn, and it burns down to meadow.";
       } },
+    { key: 'market', good: true, title: 'Black market', can: () => marketSpots().length > 0 && !markets.some(m => m.owner === cp), start(ev) {
+        const t = pickOne(marketSpots()); const m = addMarket(t.x, t.z, cp); ev.at = t;
+        ev.text = `A hooded trader pitched a black tent near your base. Click the tent to browse ${m.offers.length} rare goods. He leaves at the start of your next turn.`;
+      } },
     { key: 'pot', good: true, title: 'Pot of gold', can: () => potSpots().length > 0, start(ev) {
         const t = pickOne(potSpots()); addPot(t.x, t.z); ev.at = t;
         ev.text = `A pot of gold appeared near your base. Move any unit onto or next to it to claim ${POT_GOLD[0]}–${POT_GOLD[1]} gold. Rivals can grab it too.`;
@@ -3784,6 +3836,70 @@
     const home = tileAt(BASE.x, BASE.z);
     const sides = neighbors(home).filter(n => !wallBetween(home, n) && !(home.type === 'water' && n.type === 'water')).sort((a, b) => dist(a, LAIR) - dist(b, LAIR));
     for (const n of sides) { if (!(P().freeWalls > 0)) break; addWall(home, n); P().freeWalls--; }
+  }
+
+  // ----- the black market -----
+  const marketSpots = () => inReach(6, 3).filter(t => POT_GROUND.includes(t.type) && walkable(t) && !occupied(t) && !banditAt(t.x, t.z) && !pots.some(q => q.x === t.x && q.z === t.z) && !markets.some(m => m.x === t.x && m.z === t.z));
+  function makeMarketMesh() {
+    const g = new THREE.Group();
+    const black = new THREE.MeshStandardMaterial({ color: 0x17151c, roughness: 0.85 }), trim = new THREE.MeshStandardMaterial({ color: 0x5b2a7a, roughness: 0.7 });
+    const cloth = shadowed(new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.46, 6), black)); cloth.position.y = 0.23;
+    const hem = shadowed(new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.31, 0.04, 6), trim)); hem.position.y = 0.02;
+    const door = new THREE.Mesh(new THREE.PlaneGeometry(0.11, 0.17), new THREE.MeshBasicMaterial({ color: 0x9a5cff, transparent: true, opacity: 0.55 })); door.position.set(0, 0.09, 0.262); door.rotation.x = -0.56;
+    const pole = shadowed(new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.2, 5), M.wood)); pole.position.y = 0.52;
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), new THREE.MeshBasicMaterial({ color: 0xc28bff })); lamp.position.set(0, 0.63, 0);
+    g.add(cloth, hem, door, pole, lamp);
+    // the hooded trader standing by the entrance
+    const man = new THREE.Group();
+    const robe = shadowed(new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.27, 10), new THREE.MeshStandardMaterial({ color: 0x24212b, roughness: 0.9 }))); robe.position.y = 0.135;
+    const hood = shadowed(new THREE.Mesh(new THREE.SphereGeometry(0.058, 12, 10), new THREE.MeshStandardMaterial({ color: 0x1c1a22, roughness: 0.9 }))); hood.position.y = 0.3;
+    const peak = shadowed(new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.07, 8), new THREE.MeshStandardMaterial({ color: 0x1c1a22 }))); peak.position.set(0, 0.36, -0.02); peak.rotation.x = -0.4;
+    const face = new THREE.Mesh(new THREE.CircleGeometry(0.036, 12), new THREE.MeshBasicMaterial({ color: 0x07060a })); face.position.set(0, 0.295, 0.052);
+    [-0.014, 0.014].forEach(o => { const eye = new THREE.Mesh(new THREE.SphereGeometry(0.006, 6, 4), new THREE.MeshBasicMaterial({ color: 0xffc95a })); eye.position.set(o, 0.3, 0.056); man.add(eye); });
+    const sack = shadowed(new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 6), new THREE.MeshStandardMaterial({ color: 0x6b5236 }))); sack.scale.set(1, 0.8, 1); sack.position.set(0.08, 0.035, 0.03);
+    man.add(robe, hood, peak, face, sack);
+    man.position.set(0.24, 0, 0.2); man.rotation.y = 0.5;
+    g.add(man);
+    const glow = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.42, 30), new THREE.MeshBasicMaterial({ color: 0x9a5cff, transparent: true, opacity: 0.3, side: THREE.DoubleSide, depthWrite: false }));
+    glow.rotation.x = -Math.PI / 2; glow.position.y = 0.012; g.add(glow);
+    g.userData.lamp = lamp; g.userData.glow = glow;
+    return g;
+  }
+  function addMarket(x, z, owner, offers, id) {
+    const keys = Object.keys(MARKET_GOODS).sort(() => Math.random() - 0.5).slice(0, MARKET_OFFERS);
+    const m = { id: id != null ? id : nextId++, x, z, owner, offers: offers || keys.map(k => ({ k, price: MARKET_GOODS[k], sold: false })) };
+    m.mesh = makeMarketMesh();
+    m.mesh.traverse(o => { o.userData.marketId = m.id; });
+    const pp = posOf(x, z); m.mesh.position.set(pp.x, pp.y, pp.z); m.mesh.rotation.y = Math.atan2(BASE.x - x, BASE.z - z);
+    m.mesh.scale.set(0.01, 0.01, 0.01); tween(500, (k, e) => { const v = 0.01 + 0.99 * e; m.mesh.scale.set(v, v, v); });
+    world.add(m.mesh);
+    markets.push(m);
+    return m;
+  }
+  function removeMarket(m, animate) {
+    markets.splice(markets.indexOf(m), 1);
+    if (popMarket === m) closePopup();
+    if (!animate) return world.remove(m.mesh);
+    tween(450, (k, e) => { m.mesh.scale.set(1, 1 - e * 0.99, 1); }, () => world.remove(m.mesh));
+  }
+  function closeMarkets() {   // the trader leaves at the start of his customer's next turn
+    markets.filter(m => m.owner === cp).forEach(m => { floatAt(posOf(m.x, m.z), 'The black market packed up', '#b48cff', 1.2); removeMarket(m, true); });
+  }
+  function openMarket(m) {
+    if (m.owner !== cp) return say(`This black market only deals with ${players[m.owner] ? players[m.owner].name : 'someone else'}.`);
+    if (phase !== 'move' || busy) return;
+    cancelPlacing(false);
+    popUnit = null; popMerchant = false; popInv = false; popMarket = m;
+    openPopup(tileAt(m.x, m.z));
+  }
+  function buyMarket(i) {
+    const m = popMarket, o = m && m.offers[i];
+    if (!m || !o || o.sold || m.owner !== cp || stock.gold < o.price) return;
+    stock.gold -= o.price; pulse('gold', 'drain');
+    items[o.k]++; o.sold = true;
+    undoStack = [];
+    say(`You bought the ${ITEMS[o.k].short} for ${o.price} gold. It's in your inventory.`);
+    renderPopup(); updateHUD();
   }
 
   // ----- burning tiles -----
@@ -3887,10 +4003,18 @@
     const want = new Set((s.pots || []).map(([x, z]) => `${x},${z}`));
     pots.slice().forEach(q => { if (!want.has(`${q.x},${q.z}`)) removePot(q, true); });
     (s.pots || []).forEach(([x, z]) => { if (!pots.some(q => q.x === x && q.z === z)) addPot(x, z); });
+    const wantM = new Set((s.markets || []).map(m => m.id));
+    markets.slice().forEach(m => { if (!wantM.has(m.id)) removeMarket(m, true); });
+    (s.markets || []).forEach(d => {
+      const m = markets.find(q => q.id === d.id);
+      if (!m) addMarket(d.x, d.z, d.owner, d.offers.map(o => ({ ...o })), d.id);
+      else { m.offers = d.offers.map(o => ({ ...o })); if (popMarket === m) renderPopup(); }
+    });
     lastEvent = s.event || null;
     if (s.event && s.event.id !== toastSeen && !isLocalTurn()) { toastSeen = s.event.id; showToast(s.event); }
   }
   function animateExtras(now) {
+    markets.forEach(m => { const d = m.mesh.userData; d.glow.material.opacity = 0.22 + 0.12 * Math.sin(now * 0.004); d.lamp.scale.setScalar(0.85 + 0.2 * Math.abs(Math.sin(now * 0.006))); });
     fires.forEach(f => {
       f.flames.forEach(fl => { const d = fl.userData; const k = d.base * (0.75 + 0.35 * Math.sin(now * d.sp + d.ph) + 0.1 * Math.sin(now * 0.05 + d.ph * 3)); fl.scale.set(d.base * (0.9 + 0.1 * Math.sin(now * 0.03 + d.ph)), k, d.base); fl.rotation.y = now * 0.002 + d.ph; });
       f.embers.forEach(e => { const d = e.userData, k = (now * 0.0005 + d.ph) % 1; e.position.set(d.x * (1 - k * 0.4), 0.05 + k * 0.85, d.z * (1 - k * 0.4)); e.material.opacity = 1 - k; });
@@ -4053,7 +4177,7 @@
 
   // ---------- Inventory ----------
   let popInv = false;
-  const NEEDS_UNIT = ['scope', 'armor', 'shield', 'power', 'boots', 'sword', 'wornsword', 'horse', 'drug', 'silveraxe', 'axe', 'sickle', 'pickaxe', 'pole'];
+  const NEEDS_UNIT = ['scope', 'armor', 'shield', 'power', 'boots', 'sword', 'wornsword', 'horse', 'drug', 'speeddrug', 'gloves', 'silveraxe', 'axe', 'sickle', 'pickaxe', 'pole', ...IRON];
   function itemWhy(k) {
     if (k === 'seed') return P().farm ? 'Plant seeds by clicking your farm.' : 'Build a farm to plant seeds.';
     if (phase !== 'move' || busy) return 'Available during your moves.';
@@ -4066,9 +4190,12 @@
       if (UNITS[u.kind].totem) return "The totem can't hold items.";
       if (u.kind === 'wolf' && !WOLF_OK.includes(k)) return "Wolves can't hold items. They can only take a demon drug or a shield or power-up scroll.";
       if ((k === 'sword' || k === 'wornsword') && u.kind === 'archer') return "Archers can't use a short sword.";
+      if ((k === 'pickaxe' || k === 'ironpick') && u.kind === 'durnik') return 'Durnik refuses to use any pickaxe. He trusts only his own hammer.';
       if (!FREE_ITEMS.includes(k) && slotsFull(u)) return `${label(u)} can't carry more (${slotsUsed(u)}/${capOf(u)} items). Remove one first.`;
       const has = { sword: u.sword || u.wornSword, wornsword: u.sword || u.wornSword, armor: u.armor, scope: u.scope, shield: u.bubble, power: u.power, silveraxe: u.silver || u.tools.has('axe'), axe: u.tools.has('axe') || u.silver, boots: u.extraMoves, horse: u.horse, drug: u.drug }[k] || (u.tools && u.tools.has(k));
-      if (has) return `${label(u)} already has one.`;
+      if (has || (k === 'speeddrug' && u.speedDrug) || (k === 'gloves' && u.gloves)) return `${label(u)} already has one.`;
+      if ((ITEMS[k].tiles) && hasToolFor(u, k)) return `${label(u)} already carries a tool for ${ITEMS[k].where}.`;
+      if (IRON.includes(k)) return 'Only peasants and heroes can use iron tools.';
       if (k === 'scope') return 'Only archers can use a scope.';
       if (k === 'boots') return 'Put boots on before the unit moves.';
       if (k === 'drug') return 'The unit needs at least 2 HP.';
@@ -4079,7 +4206,7 @@
   function openInventory() {
     if (!players.length) return;
     cancelPlacing(false);
-    popUnit = null; popMerchant = false; popInv = true;
+    popUnit = null; popMerchant = false; popMarket = null; popInv = true;
     openPopup(selected ? tileAt(selected.x, selected.z) : tileAt(BASE.x, BASE.z));
   }
   function renderInventory(row) {
@@ -4094,11 +4221,11 @@
   }
 
   // ---------- River merchant ----------
-  let popMerchant = false;
+  let popMerchant = false, popMarket = null;
   function openMerchant() {
     if (!P().merchant || phase !== 'move' || busy) return;
     cancelPlacing(false);
-    popUnit = null; popMerchant = true;
+    popUnit = null; popMarket = null; popMerchant = true;
     openPopup(P().merchant.tile);
   }
   function trade(i) {
@@ -4147,6 +4274,9 @@
       else if (a.item === 'armor') { u.armor = false; u.hp = Math.max(1, u.hp - 2); u.mesh.userData.bar.userData.max = maxHpU(u); setBar(u.mesh.userData.bar, u.hp); }
       else if (a.item === 'shield') { u.bubble = false; u.shieldItem = false; }
       else if (a.item === 'power') { u.power = 0; if (selected === u) targets = atkOf(u) > 0 ? inRange(u) : []; }
+      else if (a.item === 'speeddrug') { u.speedDrug = false; if (selected === u && !u.moved) moves = reachable(u); }
+      else if (a.item === 'gloves') u.gloves = false;
+      else if (IRON.includes(a.item)) { if (u.irons) u.irons.delete(a.item); }
       else u.tools.delete(a.item);
       say(`${label(u)} put the ${ITEMS[a.item].short} back.`);
       refreshMarkers(); updateHUD();
@@ -4406,8 +4536,23 @@
         ${cost ? `<span class="bp-cost">${chips(cost)}</span>` : ''}
         <button class="${why ? '' : 'primary'}" data-act="${act}" ${why ? 'disabled' : ''}>${label2}</button>
         ${why ? `<span class="bp-why">${why}</span>` : ''}</div>`;
-    $('bpop').classList.toggle('wide', !popInv && !popMerchant && t.type === 'base');
+    $('bpop').classList.toggle('wide', !popInv && !popMerchant && !popMarket && t.type === 'base');
     if (popInv) return renderInventory(row);
+    if (popMarket) {
+      const m = popMarket;
+      $('bpTitle').textContent = 'Black market';
+      $('bpDesc').textContent = `A hooded trader with rare goods, each one sold once. You have ${stock.gold} gold. He leaves at the start of your next turn.`;
+      $('bpList').innerHTML = m.offers.map((o, i) => {
+        const why = o.sold ? 'Sold.' : stock.gold < o.price ? `Need ${o.price - stock.gold} more gold.` : null;
+        return `<div class="bp-row"><b>${ITEMS[o.k].name}</b>
+          <span class="bp-stats">${ITEMS[o.k].desc}</span>
+          <span class="bp-cost">${chips({ gold: o.price })}</span>
+          <button class="${why ? '' : 'primary'}" data-act="bm-${i}" ${why ? 'disabled' : ''}>${o.sold ? 'Sold' : 'Buy'}</button>
+          ${why && !o.sold ? `<span class="bp-why">${why}</span>` : ''}</div>`;
+      }).join('');
+      $('bpMove').hidden = true;
+      return;
+    }
     if (popMerchant) {
       const m = P().merchant;
       $('bpTitle').textContent = 'River merchant';
@@ -4486,7 +4631,7 @@
     placePopup();
   }
   function closePopup() {
-    popTile = null; popUnit = null; popMerchant = false; popInv = false;
+    popTile = null; popUnit = null; popMerchant = false; popInv = false; popMarket = null;
     $('bpop').hidden = true;
   }
   function placePopup() {
@@ -4658,6 +4803,7 @@
       if (o.userData.edge) return { ghost: o, tile: o.userData.edge.a };
       if (o.userData.unitId != null) { const u = units.find(q => q.id === o.userData.unitId); if (u) return { unit: u, tile: tileAt(u.x, u.z) }; }
       if (o.userData.banditId != null) { const b = bandits.find(q => q.id === o.userData.banditId); if (b) return { bandit: b, tile: tileAt(b.x, b.z) }; }
+      if (o.userData.marketId != null) { const m = markets.find(q => q.id === o.userData.marketId); if (m) return { market: m, tile: tileAt(m.x, m.z) }; }
       if (o.userData.tile) return { tile: o.userData.tile };
     }
     return null;
@@ -4668,6 +4814,7 @@
     const hit = pick(x, y);
     if (popTile) closePopup();
     if (!hit) return;
+    if (hit.market && !placing) return openMarket(hit.market);
     const t = hit.tile;
     if (placing) {
       if (placing.kind === 'wall') return hit.ghost ? placeWall(hit.ghost) : say(`Click one of the glowing edges near your base, or press Done building.`);
@@ -4784,6 +4931,7 @@
     else if (act.startsWith('use-')) { useItem(act.slice(4)); if (placing || phase !== 'move') closePopup(); }
     else if (btn.dataset.act.startsWith('struct-')) { closePopup(); startStruct(btn.dataset.act.slice(7)); }
     else if (btn.dataset.act.startsWith('trade-')) trade(+btn.dataset.act.slice(6));
+    else if (act.startsWith('bm-')) buyMarket(+act.slice(3));
     else recruit(btn.dataset.act);
   });
   function renderFactionPicker() {

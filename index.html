@@ -359,7 +359,7 @@
       </div>
       <p>On an island in the middle of the river sits a <b>bandit lair</b> (8 HP), ringed by bone-strewn grounds you can cross at your own risk. Its guards don't steal, but they hit anyone who comes close, and a new one comes out every 3 turns. The lair also hurls spears at up to 2 units within 2 hexes each turn, for 2 damage. Destroy it for its hoard. After that, a bandit tent pops up on a meadow within 6 hexes of the old lair every 10 player turns. Tents don't move or steal, but a bandit walks out of each one every 3 rounds.</p>
       <p><b>Turn events</b> strike every 4th turn of each player: a wandering peasant, a dwarf mason, a travelling merchant, a bountiful harvest, new wheat or forest, a pot of gold, or trouble such as a bandit tent or a fire.</p>
-      <p>Roaming bandits walk up to 2 hexes a round toward the nearest base, and rob any base within 8 hexes of them of 1 food and 1 other resource each turn. Lair guards stay put. Nerissa calms bandits within 3 hexes, and may seduce them into raiding her rivals.</p>
+      <p>Roaming bandits walk up to 2 hexes a round toward the nearest base, and rob any base within 8 hexes of them of 1 food and 1 other resource each turn. Lair guards stay put. Nerissa calms bandits and lair guards within 3 hexes, and may seduce them (guards included) into raiding her rivals.</p>
       <p>Bandits have 3 HP. When killed they drop gold, a worn-out tool, a demon drug or a shield scroll, plus 1–6 wheat seeds. A farm harvest saves a seed half the time. Build a barracks to train footmen (3 HP, hit for 2) and archers (shoot 3 tiles away).</p>
       </details>
       <p style="color:var(--muted);font-size:13.5px">Drag to rotate. Right-drag, two fingers or WASD to pan. Scroll or pinch to zoom.</p>
@@ -543,7 +543,7 @@
               ability: 'Tame wolf', abilityText: 'A wolf (1 HP, hits 1, moves 4, never eats) joins next to Fenric. Up to 3. Wolves carry no items, but can take demon drugs and scrolls.' },
     mer:    { name: 'Merfolk',            hero: 'nerissa',
               perks: 'River merchants appear twice as often. Bridges cost half.',
-              heroText: 'Nerissa (3 HP, moves 3, reach 2). Bandits within 3 hexes of her don\'t attack or steal. Each of your turns, each of them has a 20% chance to be seduced: it raids your rivals and sends what it steals to your base.',
+              heroText: 'Nerissa (3 HP, moves 3, reach 2). Bandits and lair guards within 3 hexes of her don\'t attack or steal. Each of your turns, each of them has a 20% chance to be seduced: it raids your rivals and sends what it steals to your base.',
               ability: 'Water sphere', abilityText: 'A random unit without a bubble gets one. It blocks the next hit.' },
     orc:    { name: 'Ashen Orcs',         hero: 'grukk',
               perks: 'Every unit has +1 HP. Gather 1 less on everything.',
@@ -2370,11 +2370,13 @@
   function nerissaCharm() {
     const n = mine().find(u => u.kind === 'nerissa');
     if (!n) return;
-    bandits.filter(b => !b.guard && !b.camp && b.seduced == null && dist(b, n) <= NERISSA_CALM).forEach(b => {
+    bandits.filter(b => !b.camp && b.seduced == null && dist(b, n) <= NERISSA_CALM).forEach(b => {
       if (Math.random() >= SEDUCE_CHANCE) return;
+      const wasGuard = b.guard;
+      b.guard = false;   // a seduced lair guard deserts the lair and roams for its new master (the lair will send out a replacement)
       markSeduced(b, cp);
       floatAt(b.mesh.position, 'Seduced by Nerissa!', '#ff9ccc', 1.3, 200);
-      turnLog.push(`A bandit fell for Nerissa and now works for ${P().name}.`);
+      turnLog.push(`${wasGuard ? 'A lair guard deserted the lair' : 'A bandit fell for Nerissa'} and now works for ${P().name}.`);
     });
   }
   // bandit tents send out a bandit every few rounds
@@ -3280,6 +3282,7 @@
       if (b.hp !== d.hp) { b.hp = d.hp; setBar(b.mesh.userData.bar, b.hp); }
       if (b.x !== d.x || b.z !== d.z) { b.x = d.x; b.z = d.z; hop(b.mesh, posOf(d.x, d.z), 420, 0.25); }
       if ((d.seduced ?? null) !== (b.seduced ?? null) && d.seduced != null) markSeduced(b, d.seduced);
+      b.guard = d.guard;
       b.lastSpawn = d.lastSpawn;
     });
     bandits.filter(b => !bseen.has(b.id)).forEach(b => { world.remove(b.mesh); removeTent(b); });

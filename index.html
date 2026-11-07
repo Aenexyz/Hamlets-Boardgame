@@ -2896,31 +2896,36 @@
     if (!u || !units.includes(u) || !players[u.owner]) { el.hidden = true; cardUnit = null; return; }
     const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const def = UNITS[u.kind], pl = players[u.owner], own = u.owner === cp && isLocalTurn() && phase === 'move' && !aiRunning;
+    const rival = u.owner !== cp;   // rivals see the basics only: no items, no item-driven bonuses
     const fdef = FACTIONS[pl.faction] || null;
     $('ucDot').style.color = pl.css;
     $('ucName').textContent = def.hero ? def.name : label(u);
     $('ucSub').textContent = `${def.hero ? 'Hero' : def.name} · ${pl.name}${fdef ? ` · ${fdef.name}` : ''}${u.owner === cp ? '' : ' (rival)'}`;
     // stats
-    const mx = maxHpU(u), atk = atkOf(u), base = def.atk;
-    const mv = movesOf(u);
+    const mx = maxHpU(u), base = def.atk;
+    // rivals: strip anything that comes from items (a horse is visible on the board, so it still counts)
+    const atk = rival ? atkOf(u) - (u.sword ? 1 : 0) - (u.wornSword > 0 ? 1 : 0) - (u.drug ? 2 : 0) - (u.power || 0) : atkOf(u);
+    const mv = rival ? def.moves + (u.horse ? 3 : 0) : movesOf(u);
     const mvBits = [u.speedDrug && 'speed drug: base 1', u.horse && '+3 horse', u.extraMoves && `+${u.extraMoves} boots`].filter(Boolean).join(' ');
     const atkBits = [u.sword && '+1 sword', u.wornSword > 0 && '+1 worn sword', u.drug && '+2 drug', u.power && `+${u.power} power`, u.kind === 'wolf' && atk - base - (u.sword ? 1 : 0) - (u.wornSword > 0 ? 1 : 0) - (u.drug ? 2 : 0) - (u.power || 0) > 0 && '+1 Fenric'].filter(Boolean).join(' ');
-    const rng = rangeOf(u);
+    const rng = rival ? def.range + (def.range > 1 && tileAt(u.x, u.z).type === 'tower' ? TOWER_RANGE_BONUS : 0) : rangeOf(u);
     $('ucStats').innerHTML =
       `<div class="uc-stat"><b>${u.hp}/${mx}</b><span>HP</span><div class="uc-hp"><i style="width:${Math.max(0, Math.min(100, u.hp / mx * 100))}%"></i></div></div>` +
-      `<div class="uc-stat"><b>${atk}</b><span>Attack</span>${atkBits ? `<em>${esc(atkBits)}</em>` : ''}</div>` +
-      `<div class="uc-stat"><b>${rng}</b><span>Range</span>${u.scope ? '<em>+2 scope</em>' : ''}</div>` +
-      `<div class="uc-stat"><b>${mv}</b><span>Moves</span>${mvBits ? `<em>${esc(mvBits)}</em>` : ''}</div>`;
+      `<div class="uc-stat"><b>${atk}</b><span>Attack</span>${atkBits && !rival ? `<em>${esc(atkBits)}</em>` : ''}</div>` +
+      `<div class="uc-stat"><b>${rng}</b><span>Reach</span>${u.scope && !rival ? '<em>+2 scope</em>' : ''}</div>` +
+      `<div class="uc-stat"><b>${mv}</b><span>Moves</span>${mvBits && !rival ? `<em>${esc(mvBits)}</em>` : ''}</div>`;
     $('ucFold').textContent = cardFolded ? '▸' : '▾';
     $('ucFold').title = cardFolded ? 'Show details' : 'Collapse';
     el.classList.toggle('folded', cardFolded);
     // status
     const tags = [];
     if (u.hungry) tags.push(['bad', 'Hungry: skips gathering, starves if unfed again']);
-    if (u.bubble) tags.push(['good', u.shieldItem ? 'Shielded' : 'Water bubble']);
-    if (u.power) tags.push(['good', `Powered up (+${u.power})`]);
-    if (u.drug) tags.push(['bad', 'Drugged this turn']);
-    if (u.gloves || u.speedDrug) tags.push(['good', u.secondSwing ? 'Second attack ready' : 'Attacks twice']);
+    if (u.bubble) tags.push(['good', rival ? 'Shielded' : u.shieldItem ? 'Shielded' : 'Water bubble']);   // the bubble shows on the board anyway
+    if (!rival) {
+      if (u.power) tags.push(['good', `Powered up (+${u.power})`]);
+      if (u.drug) tags.push(['bad', 'Drugged this turn']);
+      if (u.gloves || u.speedDrug) tags.push(['good', u.secondSwing ? 'Second attack ready' : 'Attacks twice']);
+    }
     if (u.owner === cp && phase === 'move') tags.push(['', u.done ? 'Done this turn' : u.moved ? 'Has moved' : 'Ready']);
     if (UNITS[u.kind].totem) tags.push(['', `${Math.max(0, u.life || 0) + 1} turn${(u.life || 0) ? 's' : ''} left`]);
     // skills
@@ -2928,15 +2933,22 @@
     if (def.hero && fdef) {
       const cd = pl.cd || 0;
       const passive = fdef.heroText.replace(/^[^.]*\)\.\s*/, '');
+      const irons = [...(u.irons || [])];
+      const gatherLine = def.gathers
+        ? (u.kind === 'durnik' ? 'Can gather on any resource tile, and digs twice on quarries and gold veins.' : 'Can gather on any resource tile.')
+        : irons.length ? `Only gathers on ${irons.map(k => ITEMS[k].where).join(' and ')}, thanks to the ${irons.map(k => ITEMS[k].short).join(' and ')}.`
+        : "Can't gather. An iron tool from the black market would let them gather on its tiles.";
       skills = `<div class="uc-sec"><h4>Skills</h4>
         <p><b>Passive.</b> ${esc(passive)}</p>
+        ${rival ? '' : `<p><b>Gathering.</b> ${esc(gatherLine)}</p>`}
         <p><b>${esc(fdef.ability)}</b> (every ${ABILITY_CD} turns · ${cd > 0 ? `ready in ${cd} turn${cd > 1 ? 's' : ''}` : 'ready'}). ${esc(fdef.abilityText)}</p>
         <p style="color:var(--muted);font-size:12px">Faction: ${esc(fdef.perks)}</p></div>`;
     } else if (UNIT_NOTES[u.kind]) skills = `<div class="uc-sec"><h4>About</h4><p>${esc(UNIT_NOTES[u.kind])}</p></div>`;
     // items
     const gear = gearOf(u), cap = capOf(u);
     let itemsHtml = '';
-    if (cap > 0 || gear.length || u.kind === 'wolf') {
+    if (rival) itemsHtml = '<div class="uc-sec"><h4><span>Items</span><span>hidden</span></h4><p class="uc-empty">You can\'t see what a rival\'s unit is carrying.</p></div>';
+    else if (cap > 0 || gear.length || u.kind === 'wolf') {
       const used = gear.filter(i => i.counts).length;
       itemsHtml = `<div class="uc-sec"><h4><span>${u.kind === 'wolf' ? 'Effects' : 'Items'}</span><span>${u.kind === 'wolf' ? 'no items' : cap === Infinity ? `${used} · no limit` : `${used}/${cap}`}</span></h4>` +
         (gear.length ? gear.map(i => `<div class="uc-item"><div><b>${esc(i.name)}</b><small>${esc(i.note)}</small></div>${own ? (i.removable ? `<button data-rm="${i.k}" title="${i.drop ? 'Throw it away' : 'Put it back in your inventory'}">${i.drop ? 'Drop' : 'Remove'}</button>` : `<small title="${esc(i.why || '')}">${esc(i.why || '')}</small>`) : ''}</div>`).join('')

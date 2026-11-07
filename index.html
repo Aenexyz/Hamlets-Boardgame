@@ -323,7 +323,7 @@
       <button id="invBtn" title="See and use your items (I)">Inventory <span class="cost" id="invCount"></span> <kbd>I</kbd></button>
       <button id="skip" title="This unit is finished for the turn (Space)"><span id="skipLbl">Hold</span> <kbd>Space</kbd></button>
       <button id="build" class="active" hidden title="Stop placing the barracks (Esc)">Cancel build</button>
-      <button id="endMoves" class="primary" title="Finish moving (Enter)">End moves <kbd>Enter</kbd></button>
+      <button id="endMoves" class="primary" title="End your turn (Enter)">End turn <kbd>Enter</kbd></button>
     </div>
   </div>
   <div class="panel ucard" id="ucard" hidden aria-live="polite">
@@ -4613,7 +4613,7 @@
       if (selected.extraMoves) tags.push(`boots: ${UNITS[selected.kind].moves + selected.extraMoves} moves`);
       $('infoT').textContent = `${label(selected)} · ${tags.join(' · ')} · ${left} unit${left > 1 ? 's' : ''} left`;
     } else if (phase === 'move') {
-      $('infoT').textContent = busy ? 'Moving…' : 'All units are done. End moves when ready.';
+      $('infoT').textContent = busy ? 'Moving…' : 'All units are done. End turn when ready.';
     } else {
       if (online.on && !isLocalTurn() && phase !== 'over') $('infoT').textContent = `Waiting for ${P().name}${P().nick ? ' (' + P().nick + ')' : P().ai ? ' (AI)' : ''}…`;
       else if (aiRunning) $('infoT').textContent = `${P().name} (AI) is thinking…`; else $('infoT').textContent = { gather: 'Gather phase', bandits: 'Combat phase', upkeep: 'Upkeep phase', end: 'Turn ending', over: 'Game over' }[phase] || '';

@@ -99,6 +99,29 @@
   .card .legend span { display: flex; align-items: center; gap: 8px; }
   .sw { width: 14px; height: 14px; border-radius: 3px; flex: none; }
 
+  /* guided tour */
+  .toprow { display: flex; gap: 6px; }
+  #tour { position: fixed; inset: 0; z-index: 60; }
+  #tour[hidden] { display: none; }
+  .tour-spot { position: absolute; border-radius: 14px; box-shadow: 0 0 0 200vmax rgba(8, 9, 12, 0.66), 0 0 0 2px #e8c255, 0 0 22px 4px rgba(232, 194, 85, 0.55);
+    transition: left .35s ease, top .35s ease, width .35s ease, height .35s ease, border-radius .35s ease; pointer-events: none; }
+  .tour-spot.round { border-radius: 50%; }
+  .tour-spot.none { box-shadow: 0 0 0 200vmax rgba(8, 9, 12, 0.66); }
+  .tour-card { position: absolute; width: min(380px, calc(100vw - 32px)); padding: 16px 18px 14px; display: flex; flex-direction: column; gap: 8px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5); transition: left .3s ease, top .3s ease; }
+  .tour-card h3 { margin: 0; font-size: 20px; color: #e8c255; font-family: var(--serif, Georgia, serif); }
+  .tour-card p { margin: 0; font-size: 14.5px; line-height: 1.5; }
+  .tour-card p b { color: #f3e6c4; }
+  .tour-top { display: flex; justify-content: space-between; align-items: center; }
+  .tour-count { font-size: 11.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+  .tour-skip { background: none; border: 0; color: var(--muted); font-size: 13px; padding: 2px 4px; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+  .tour-skip:hover { color: var(--parch); }
+  .tour-dots { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 2px; }
+  .tour-dots i { width: 7px; height: 7px; border-radius: 50%; background: rgba(235, 225, 203, 0.18); }
+  .tour-dots i.on { background: #e8c255; }
+  .tour-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+  .tour-yield { display: inline-block; font-weight: 700; color: #f3e6c4; }
+  @media (max-width: 620px) { .tour-card { left: 16px !important; right: 16px; bottom: 16px; top: auto !important; width: auto; } }
   /* unit overview card */
   .ucard { position: absolute; z-index: 4; right: max(16px, env(safe-area-inset-right, 0px)); width: 290px; overflow-y: auto; padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.45);
     scrollbar-width: thin; scrollbar-color: #c9a640 rgba(235, 225, 203, 0.08); }
@@ -293,7 +316,7 @@
         <li data-p="gather">Gather</li><li data-p="move">Move</li><li data-p="bandits" class="foe">Combat</li><li data-p="upkeep">Upkeep</li><li data-p="end">End</li>
       </ol>
     </div>
-    <button id="restart" class="restart" title="Start over on a new map">Restart map</button>
+    <div class="toprow"><button id="restart" class="restart" title="Start over on a new map">Restart map</button><button id="tourBtn" class="restart" title="Replay the guided tour">Tour</button></div>
     </div>
     <div class="stockwrap" id="stockWrap">
       <div class="panel" id="stock"></div>
@@ -422,6 +445,16 @@
     </div>
   </div>
   <div id="evToast" hidden></div>
+  <div id="tour" hidden role="dialog" aria-modal="true" aria-labelledby="tourTitle">
+    <div class="tour-spot" id="tourSpot"></div>
+    <div class="panel tour-card" id="tourCard">
+      <div class="tour-top"><span class="tour-count" id="tourCount"></span><button class="tour-skip" id="tourSkip">Skip tour</button></div>
+      <h3 id="tourTitle"></h3>
+      <p id="tourText"></p>
+      <div class="tour-dots" id="tourDots"></div>
+      <div class="tour-btns"><button id="tourBack">Back</button><button class="primary" id="tourNext">Next</button></div>
+    </div>
+  </div>
   <div class="overlay" id="over" hidden>
     <div class="panel card">
       <h2 id="overTitle">The settlement has fallen</h2>
@@ -1540,7 +1573,9 @@
     $('report').hidden = true;
     $('handoff').hidden = true;
     say(players.length > 1 ? `${players.length} settlements, one per corner. Red goes first.` : 'Your two peasants are ready. Click your base to train more.');
-    beginPlayerTurn();
+    // first game on this device: a guided tour runs before anyone's first turn
+    if ($('intro').hidden && !onlineSeats && !tourSeen() && players.some(pl => !pl.ai)) { phase = 'gather'; busy = true; updateHUD(); startTour(beginPlayerTurn); }
+    else beginPlayerTurn();
   }
 
   function focusBase(snap) {
@@ -2876,6 +2911,107 @@
     }
     say(back ? `${label(u)} handed back the ${ITEMS[k].short}. It's in your inventory.` : `${label(u)} dropped the worn-out short sword. It was too battered to keep.`);
     refreshMarkers(); updateHUD();
+  }
+
+  // ---------- Guided tour ----------
+  let tour = null;   // { steps, i, onDone, radius }
+  const tourSeen = () => { try { return localStorage.getItem('roth.tourSeen') === '1'; } catch (e) { return false; } };
+  const yieldRange = type => { const y = YIELD[type]; return `${y[0][0]}–${y[y.length - 1][0]}`; };
+  const nearestOf = type => tiles.filter(t => t.type === type).sort((a, b) => dist(a, BASE) - dist(b, BASE))[0] || null;
+  function tourSteps() {
+    const pl = players.find(q => !q.ai) || P();
+    const h = mine().find(u => UNITS[u.kind].hero);
+    const tileStep = (type, title, text) => nearestOf(type) ? [{ title, tile: () => nearestOf(type), text }] : [];
+    return [
+      { title: 'Welcome to Rise of the Hamlets', text: `Grow your hamlet into an <b>Empire</b>, or be the <b>last base standing</b>. This quick tour shows you the board, your resources and the bandits. It takes about a minute.` },
+      { title: 'Your base', tile: () => tileAt(BASE.x, BASE.z), text: `This is ${players.length > 1 ? `${pl.name}'s` : 'your'} base: a <b>Hamlet</b> with ${STAGES[0].hp} HP. Click it to train peasants, build, and upgrade to Town, City and finally <b>Empire</b>, which wins the game. If it's destroyed, you're out.` },
+      { title: 'Your units', tile: () => { const u = h || mine()[0]; return tileAt(u.x, u.z); }, text: `You start with <b>2 peasants</b>${h ? ` and your hero, <b>${UNITS[h.kind].name}</b>` : ''}. Click a unit to select it, then a green hex to move there. At the start of each turn, peasants <b>gather</b> from the tile they stand on. Click any unit to see its stats, skills and items.` },
+      { title: 'A turn, step by step', el: '#phases', text: `<b>Gather</b>: your peasants collect. <b>Move</b>: move, fight, build and use items. <b>Combat</b>: bandits act. <b>Upkeep</b>: every unit eats 1 food. Then the next player goes.` },
+      { title: 'Your resources', el: '#stockWrap', text: `<b>Food, wood, stone and gold.</b> Every unit eats 1 food at upkeep. Unfed units go <b>hungry</b> and can't gather; unfed again, they <b>starve</b>. Tap the small arrow to tuck this panel away.` },
+      ...tileStep('field', 'Wheat fields', `Give <span class="tour-yield">${yieldRange('field')} food</span> a turn. Peasants sometimes find wild berries, a rusty sickle, or <b>wheat seeds</b> to plant at your farm.`),
+      ...tileStep('forest', 'Forests', `Give <span class="tour-yield">${yieldRange('forest')} wood</span> a turn. You might find an injured deer (food), a worn-out axe, a <b>wild horse</b>, or a bandit stash.`),
+      ...tileStep('quarry', 'Quarries', `Give <span class="tour-yield">${yieldRange('quarry')} stone</span> a turn, for walls, upgrades and soldiers. Watch for flecks of gold, cracked pickaxes and bandit stashes.`),
+      ...tileStep('mine', 'Gold veins', `Give <span class="tour-yield">${yieldRange('mine')} gold</span> a turn: slow, but gold buys scrolls, merchant goods and black-market treasures.`),
+      ...tileStep('bank', 'Riverbanks', `Give <span class="tour-yield">${yieldRange('bank')} food</span> (fish) a turn, plus the most surprises: driftwood, lost coins, a <b>river merchant</b>, food crates, boots, and a rare silver axe. Bandits like the river too.`),
+      ...tileStep('meadow', 'Meadows', `Produce nothing, but this is where you <b>build</b>: your farm, barracks, walls and watchtowers go on free tiles near your base.`),
+      { title: 'Bandits', tile: () => tileAt(LAIR.x, LAIR.z), text: `The <b>bandit lair</b> sits on an island in the river. Its guards stay put, and it hurls spears at units within ${LAIR_SPEAR_RANGE} hexes. Roaming bandits come from ambushes and tents: they walk toward the nearest base and <b>steal 1 food and 1 other resource</b> each turn from any base within ${STEAL_RANGE} hexes. Kill them for gold, tools and seeds, and destroy the lair for its hoard.` },
+      { title: 'Your actions', el: '.actions', text: `<b>Undo</b> takes back a move. Your hero's <b>ability</b> glows when it's ready. <b>Inventory</b> holds the items you find. <b>Hold</b> finishes a unit for the turn. <b>End turn</b> (Enter) passes play on.` },
+      { title: 'Surprises', text: `Every 4th turn brings an <b>event</b>: a wandering peasant, a black market, a pot of gold, a bountiful harvest, or trouble like fires and bandit tents. A glowing notice tells you what happened.` },
+      { title: "You're ready", text: `Gather, grow, and defend your base. Replay this tour any time with the <b>Tour</b> button. Good luck!`, last: true },
+    ];
+  }
+  function startTour(onDone) {
+    if (tour) return;
+    closePopup(); hideUnitCard();
+    tour = { steps: tourSteps(), i: 0, onDone, radius: cam.radius };
+    $('tour').hidden = false;
+    showTourStep();
+  }
+  function endTour(skipped) {
+    if (!tour) return;
+    const done = tour.onDone;
+    cam.radius = tour.radius;
+    tour = null;
+    $('tour').hidden = true;
+    try { localStorage.setItem('roth.tourSeen', '1'); } catch (e) {}
+    focusBase(false);
+    if (skipped) say('Tour skipped. Replay it any time with the Tour button.');
+    if (done) done();
+  }
+  function showTourStep() {
+    const st = tour.steps[tour.i], n = tour.steps.length;
+    $('tourCount').textContent = `Step ${tour.i + 1} of ${n}`;
+    $('tourTitle').textContent = st.title;
+    $('tourText').innerHTML = st.text;
+    $('tourDots').innerHTML = tour.steps.map((_, i) => `<i class="${i <= tour.i ? 'on' : ''}"></i>`).join('');
+    $('tourBack').disabled = tour.i === 0;
+    $('tourNext').textContent = st.last ? 'Start playing' : 'Next';
+    $('tourSkip').hidden = !!st.last;
+    if (st.tile) { const t = st.tile(); if (t) { const v = posOf(t.x, t.z); cam.goal.set(v.x, 0, v.z); cam.radius = Math.min(tour.radius, 11); } }
+    else if (!st.el) { cam.radius = tour.radius; focusBase(false); }
+    positionTour();
+    $('tourNext').focus({ preventScroll: true });
+  }
+  function tourGo(d) {
+    if (!tour) return;
+    const i = tour.i + d;
+    if (i >= tour.steps.length) return endTour(false);
+    if (i < 0) return;
+    tour.i = i; showTourStep();
+  }
+  // keep the spotlight and card on their target (the camera glides between tiles)
+  function positionTour() {
+    if (!tour) return;
+    const st = tour.steps[tour.i], spot = $('tourSpot'), card = $('tourCard');
+    const W = innerWidth, H = innerHeight;
+    let r = null, round = false;
+    if (st.el) { const e = document.querySelector(st.el); if (e && e.offsetParent !== null) { const b = e.getBoundingClientRect(); r = { x: b.left - 6, y: b.top - 6, w: b.width + 12, h: b.height + 12 }; } }
+    else if (st.tile) {
+      const t = st.tile();
+      if (t) {
+        const v = posOf(t.x, t.z); v.y += 0.25; v.project(camera);
+        const gr = game.getBoundingClientRect();
+        const cx = gr.left + (v.x + 1) / 2 * gr.width, cy = gr.top + (1 - v.y) / 2 * gr.height;
+        const rad = Math.max(54, Math.min(90, gr.width * 0.07));
+        // only spotlight the tile if it actually lands on screen; otherwise just dim
+        if (Number.isFinite(cx) && Number.isFinite(cy) && v.z < 1 && cx > -rad && cx < W + rad && cy > -rad && cy < H + rad) { r = { x: cx - rad, y: cy - rad, w: rad * 2, h: rad * 2 }; round = true; }
+      }
+    }
+    spot.classList.toggle('round', round);
+    spot.classList.toggle('none', !r);
+    if (r) Object.assign(spot.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.w}px`, height: `${r.h}px` });
+    else Object.assign(spot.style, { left: `${W / 2}px`, top: `${H / 2}px`, width: '0px', height: '0px' });
+    if (W <= 620) return;   // phones: the card is pinned to the bottom by CSS
+    const cw = card.offsetWidth, ch = card.offsetHeight;
+    let left, top;
+    if (!r) { left = (W - cw) / 2; top = (H - ch) / 2; }
+    else {
+      left = Math.min(W - cw - 16, Math.max(16, r.x + r.w / 2 - cw / 2));
+      top = r.y + r.h + 16;
+      if (top + ch > H - 16) top = r.y - ch - 16;
+      if (top < 16) { top = Math.max(16, Math.min(H - ch - 16, r.y + r.h / 2 - ch / 2)); left = r.x + r.w + 20 + cw < W ? r.x + r.w + 20 : Math.max(16, r.x - cw - 20); }
+    }
+    card.style.left = `${left}px`; card.style.top = `${top}px`;
   }
 
   // ---------- Unit overview card ----------
@@ -5004,6 +5140,11 @@
   $('stockPill').addEventListener('click', () => setStockFolded(false));
   try { if (localStorage.getItem('roth.stockFolded') === '1') setStockFolded(true); } catch (e) {}
   $('ucClose').addEventListener('click', hideUnitCard);
+  $('tourNext').addEventListener('click', () => tourGo(1));
+  $('tourBack').addEventListener('click', () => tourGo(-1));
+  $('tourSkip').addEventListener('click', () => endTour(true));
+  $('tourBtn').addEventListener('click', () => { if (!aiRunning && !busy) startTour(null); });
+  addEventListener('resize', positionTour);
   $('ucFold').addEventListener('click', () => { cardFolded = !cardFolded; renderUnitCard(); });
   $('ucBody').addEventListener('click', e => { const b = e.target.closest('[data-rm]'); if (b && cardUnit) removeItem(cardUnit, b.dataset.rm); });
   addEventListener('resize', () => { if (cardUnit) renderUnitCard(); });
@@ -5013,6 +5154,12 @@
 
   const keys = new Set();
   window.addEventListener('keydown', e => {
+    if (tour) {   // the tour has the keyboard while it's open
+      if (e.key === 'ArrowRight' || e.key === 'Enter') { e.preventDefault(); tourGo(1); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); tourGo(-1); }
+      else if (e.key === 'Escape') { e.preventDefault(); endTour(true); }
+      return;
+    }
     if (e.target.closest && e.target.closest('button') && (e.key === ' ' || e.key === 'Enter')) return;
     if (!$('intro').hidden || !$('lobby').hidden) return;
     if ((aiRunning || !isLocalTurn()) && e.key !== 'w' && e.key !== 'a' && e.key !== 's' && e.key !== 'd' && !e.key.startsWith('Arrow')) return;
@@ -5055,6 +5202,7 @@
       if (k >= 1) { tweens.splice(i, 1); tw.done && tw.done(); }
     }
     animateExtras(now);
+    if (tour) positionTour();
     const glow = 0.5 + 0.5 * Math.sin(now * 0.006);
     moves.forEach((_, t) => { if (t.mesh.material !== waterMat) t.mesh.material.emissive.setRGB(0.04 + 0.04 * glow, 0.42 + 0.28 * glow, 0.1 + 0.06 * glow); });
     showRings([...moves.keys()], now);

@@ -520,10 +520,12 @@
     forest: [{ p: 0.05,  text: 'found an injured deer', gain: { food: 3 } },
              { p: 0.03,  text: 'caught a wild horse', item: 'horse' },
              { p: 0.03,  text: 'found a bandit stash', stash: true },
-             { p: 0.035, text: 'found a worn-out axe', item: 'axe' }],
+             { p: 0.035, text: 'found a worn-out axe', item: 'axe' },
+             { p: 0.05,  text: 'found healing herbs', item: 'herbs' }],
     field:  [{ p: 0.06,  text: 'found wild berries', gain: { food: 2 } },
              { p: 0.15,  text: 'found wheat seeds', seeds: [1, 3] },
-             { p: 0.035, text: 'found a rusty sickle', item: 'sickle' }],
+             { p: 0.035, text: 'found a rusty sickle', item: 'sickle' },
+             { p: 0.05,  text: 'found healing herbs', item: 'herbs' }],
     quarry: [{ p: 0.05,  text: 'spotted a fleck of gold', gain: { gold: 1 } },
              { p: 0.03,  text: 'found a bandit stash', stash: true },
              { p: 0.035, text: 'found a cracked pickaxe', item: 'pickaxe' }],
@@ -578,6 +580,8 @@
     ironaxe:   { name: 'Iron axe',        short: 'iron axe',     special: 'iron', tiles: ['forest'], where: 'forests', desc: 'Never breaks: always gathers twice on forests. Lets any hero gather there too.' },
     ironrod:   { name: 'Sturdy fishing rod', short: 'sturdy fishing rod', special: 'iron', tiles: ['bank'], where: 'riverbanks', desc: 'Never breaks: always gathers twice on riverbanks. Lets any hero gather there too.' },
     ironsickle:{ name: 'Iron sickle',     short: 'iron sickle',  special: 'iron', tiles: ['field'], where: 'wheat fields', desc: 'Never breaks: always gathers twice on wheat fields. Lets any hero gather there too.' },
+    ironboots: { name: 'Iron boots',      short: 'iron boots',   special: 'ironboots', desc: '+1 max HP and +1 movement, permanently.' },
+    herbs:     { name: 'Healing herbs',   short: 'healing herbs', special: 'herbs', desc: 'Heals 1 HP. Each unit can use herbs once per turn.' },
     silveraxe: { name: 'Silver axe',      short: 'silver axe',   special: 'silver', tiles: ['forest'], where: 'a forest', desc: 'Never breaks: the peasant holding it always gathers twice on forests. Only one per settlement.' },
   };
   const DROP_TOOLS = ['axe', 'sickle', 'pickaxe', 'pole', 'boots'];
@@ -645,21 +649,21 @@
   const BUILDINGS = {
     barracks: { name: 'Barracks',   stage: 1, cost: BARRACKS_COST,                  text: ['Lets you train footmen and archers.', 'Unlocked at Town. Goes within 4 hexes of the base.'] },
     farm:     { name: 'Farm',       stage: 0, cost: { wood: 6, stone: 2 },          text: ['Plant wheat seeds. Each grows 1–2 food after 2 turns.', 'Available from the start. Goes within 4 hexes of the base.'] },
-    smith:    { name: 'Blacksmith', stage: 2, cost: { wood: 6, stone: 6, gold: 2 }, text: ['Craft tools, weapons, armor, scopes and landmines.', 'Unlocked at City. Goes within 4 hexes of the base.'] },
+    smith:    { name: 'Blacksmith', stage: 2, cost: { wood: 6, stone: 6, gold: 2 }, text: ['Craft iron tools, weapons, armor, iron boots, scopes and landmines.', 'Unlocked at City. Goes within 4 hexes of the base.'] },
     wizard:   { name: 'Wizard tower', stage: 2, cost: { wood: 6, stone: 8, gold: 4 }, text: ['Buy one-use magic scrolls with gold.', 'Unlocked at City. Goes within 4 hexes of the base.'] },
   };
   const FARM_SLOTS = 6;
   const SEED_GROW_TURNS = 2;
   const RECIPES = [
-    { item: 'sword',   cost: { wood: 2, stone: 3, gold: 1 } },
-    { item: 'axe',     cost: { wood: 2, stone: 1 } },
-    { item: 'sickle',  cost: { wood: 1, stone: 2 } },
-    { item: 'pickaxe', cost: { wood: 2, stone: 2 } },
-    { item: 'pole',    cost: { wood: 2, food: 1 } },
-    { item: 'boots',   cost: { food: 2, gold: 1 } },
-    { item: 'landmine', cost: { wood: 1, stone: 2, gold: 1 } },
-    { item: 'scope',   cost: { wood: 1, stone: 1, gold: 2 } },
-    { item: 'armor',   cost: { stone: 3, gold: 2 } },
+    { item: 'ironaxe',    group: 'Tools · never break', cost: { wood: 2, stone: 2, gold: 2 } },
+    { item: 'ironsickle', group: 'Tools · never break', cost: { wood: 2, stone: 2, gold: 2 } },
+    { item: 'ironrod',    group: 'Tools · never break', cost: { wood: 2, stone: 2, gold: 2 } },
+    { item: 'ironpick',   group: 'Tools · never break', cost: { wood: 2, stone: 2, gold: 2 } },
+    { item: 'sword',      group: 'Weapons & gear', cost: { wood: 2, stone: 3, gold: 1 } },
+    { item: 'armor',      group: 'Weapons & gear', cost: { stone: 3, gold: 2 } },
+    { item: 'ironboots',  group: 'Weapons & gear', cost: { stone: 3, gold: 2 } },
+    { item: 'scope',      group: 'Weapons & gear', cost: { wood: 1, stone: 1, gold: 2 } },
+    { item: 'landmine',   group: 'Traps', cost: { wood: 1, stone: 2, gold: 1 } },
   ];
   const SCROLLS = [
     { item: 'lightning',  cost: { gold: 3 } },
@@ -1456,7 +1460,7 @@
   };
   const nextTo = (u, kind) => units.some(q => q.owner === u.owner && q.kind === kind && dist(q, u) === 1);
   const atkOf = u => UNITS[u.kind].atk + (u.sword ? 1 : 0) + (u.wornSword > 0 ? 1 : 0) + (u.drug ? 2 : 0) + (u.power || 0) + (u.kind === 'wolf' && nextTo(u, 'fenric') ? 1 : 0);
-  const maxHpU = u => maxHpOf(u.kind, u.owner) + (u.armor ? 2 : 0);
+  const maxHpU = u => maxHpOf(u.kind, u.owner) + (u.armor ? 2 : 0) + (u.ironBoots ? 1 : 0);
   const heroOf = (owner = cp) => units.find(u => u.owner === owner && UNITS[u.kind].hero);
   const P = () => players[cp];
   function setCurrent(i) {
@@ -2080,7 +2084,7 @@
     if (P().ai) runAI();
   }
 
-  const movesOf = u => (u.speedDrug ? 1 : UNITS[u.kind].moves) + (u.extraMoves || 0) + (u.horse ? 3 : 0);   // the speed drug cuts base movement to 1
+  const movesOf = u => (u.speedDrug ? 1 : UNITS[u.kind].moves) + (u.extraMoves || 0) + (u.horse ? 3 : 0) + (u.ironBoots ? 1 : 0);   // the speed drug cuts base movement to 1
   function reachable(u) {
     const steps = movesOf(u);
     const start = tileAt(u.x, u.z);
@@ -2750,7 +2754,7 @@
   }
   // ---------- What a unit carries ----------
   const FREE_ITEMS = ['horse', 'drug', 'speeddrug'];   // horses and drugs don't take up a slot
-  const WOLF_OK = ['drug', 'speeddrug', 'shield', 'power'];   // wolves carry nothing, but can take a demon drug or a scroll
+  const WOLF_OK = ['drug', 'speeddrug', 'shield', 'power', 'herbs'];   // wolves carry nothing, but can take a demon drug or a scroll
   const capOf = u => UNITS[u.kind].hero ? Infinity : UNITS[u.kind].totem || u.kind === 'wolf' ? 0 : u.kind === 'peasant' ? 2 : 4;
   function gearOf(u) {
     const g = [];
@@ -2763,6 +2767,7 @@
     if (u.sword) add('sword', '+1 attack');
     if (u.wornSword > 0) add('wornsword', '+1 attack on the next attack · one use');
     if (u.armor) add('armor', '+2 max HP');
+    if (u.ironBoots) add('ironboots', '+1 max HP, +1 movement');
     if (u.scope) add('scope', '+2 range');
     if (u.bubble && u.shieldItem) add('shield', 'Blocks the next hit · one use');
     if (u.power) add('power', `+${u.power} damage on the next attack · one use`);
@@ -2798,6 +2803,8 @@
     if (k === 'horse') return !selected.horse;
     if (k === 'drug') return !selected.drug && selected.hp >= 2;
     if (k === 'speeddrug') return !selected.speedDrug;
+    if (k === 'herbs') return selected.hp < maxHpU(selected) && selected.herbTurn !== turn;   // once per unit per turn
+    if (k === 'ironboots') return !selected.ironBoots;
     if (k === 'gloves') return !selected.gloves;
     if ((k === 'pickaxe' || k === 'ironpick') && selected.kind === 'durnik') return false;   // Durnik won't touch a pickaxe
     if (k === 'ironaxe' && selected.kind === 'grukk') return false;   // Grukk hunts in forests, he doesn't chop
@@ -2862,6 +2869,16 @@
     if (k === 'scope') {
       u.scope = true; targets = atkOf(u) > 0 ? inRange(u) : [];
       say(`${label(u)} fits the scope and now shoots ${rangeOf(u)} hexes.`);
+    } else if (k === 'herbs') {
+      u.hp = Math.min(maxHpU(u), u.hp + 1); u.herbTurn = turn;
+      setBar(u.mesh.userData.bar, u.hp);
+      floatAt(u.mesh.position, '+1 HP', '#7dff9a', 1.1);
+      say(`${label(u)} chews healing herbs: ${u.hp}/${maxHpU(u)} HP.`);
+    } else if (k === 'ironboots') {
+      u.ironBoots = true; u.hp += 1;
+      u.mesh.userData.bar.userData.max = maxHpU(u); setBar(u.mesh.userData.bar, u.hp);
+      if (!u.moved && !u.done) moves = reachable(u);
+      say(`${label(u)} pulls on iron boots: ${u.hp}/${maxHpU(u)} HP and ${movesOf(u)} moves.`);
     } else if (k === 'armor') {
       u.armor = true; u.hp += 2;
       u.mesh.userData.bar.userData.max = maxHpU(u); setBar(u.mesh.userData.bar, u.hp);
@@ -2924,6 +2941,7 @@
     else if (k === 'armor') { u.armor = false; u.hp = Math.min(u.hp, maxHpU(u)); u.mesh.userData.bar.userData.max = maxHpU(u); setBar(u.mesh.userData.bar, u.hp); }
     else if (k === 'scope') u.scope = false;
     else if (k === 'gloves') u.gloves = false;
+    else if (k === 'ironboots') { u.ironBoots = false; u.hp = Math.min(u.hp, maxHpU(u)); u.mesh.userData.bar.userData.max = maxHpU(u); setBar(u.mesh.userData.bar, u.hp); }
     else if (IRON.includes(k)) { if (u.irons) u.irons.delete(k); }
     else if (k === 'shield') { u.bubble = false; u.shieldItem = false; }
     else if (k === 'power') u.power = 0;
@@ -3361,7 +3379,7 @@
       })),
       tiles: tiles.map(t => [t.type, t.amount, t.max, t.owner == null ? -1 : t.owner, t.crops ? t.crops.map(c => c.planted) : null, t.burn ? [t.burn.by, t.burn.at] : 0]),
       units: units.map(u => ({ id: u.id, owner: u.owner, kind: u.kind, num: u.num, x: u.x, z: u.z, hp: u.hp, moved: u.moved, done: u.done, hungry: u.hungry,
-        tools: [...u.tools], irons: [...(u.irons || [])], gloves: !!u.gloves, speedDrug: !!u.speedDrug, secondSwing: !!u.secondSwing, silver: !!u.silver, sword: !!u.sword, wornSword: u.wornSword || 0, armor: !!u.armor, scope: !!u.scope, horse: !!u.horse,
+        tools: [...u.tools], irons: [...(u.irons || [])], ironBoots: !!u.ironBoots, herbTurn: u.herbTurn || null, gloves: !!u.gloves, speedDrug: !!u.speedDrug, secondSwing: !!u.secondSwing, silver: !!u.silver, sword: !!u.sword, wornSword: u.wornSword || 0, armor: !!u.armor, scope: !!u.scope, horse: !!u.horse,
         bubble: !!u.bubble, shieldItem: !!u.shieldItem, power: u.power || 0, drug: !!u.drug, fought: !!u.fought, extraMoves: u.extraMoves || 0, life: u.life || 0, rot: u.mesh.rotation.y })),
       bandits: bandits.map(b => ({ id: b.id, x: b.x, z: b.z, hp: b.hp, guard: b.guard, target: b.target, tent: !!b.tent, camp: !!b.camp, seduced: b.seduced == null ? null : b.seduced, lastSpawn: b.lastSpawn == null ? null : b.lastSpawn })),
       pots: pots.map(q => [q.x, q.z]),
@@ -3393,7 +3411,7 @@
   // ----- rebuild or update the board from a snapshot -----
   function unitFromData(d) {
     const u = { id: d.id, owner: d.owner, kind: d.kind, num: d.num, x: d.x, z: d.z, hp: d.hp, moved: d.moved, done: d.done, hungry: d.hungry,
-      tools: new Set(d.tools || []), irons: new Set(d.irons || []), gloves: !!d.gloves, speedDrug: !!d.speedDrug, secondSwing: !!d.secondSwing, silver: d.silver, sword: d.sword, wornSword: d.wornSword, armor: d.armor, scope: d.scope, horse: d.horse,
+      tools: new Set(d.tools || []), irons: new Set(d.irons || []), ironBoots: !!d.ironBoots, herbTurn: d.herbTurn || null, gloves: !!d.gloves, speedDrug: !!d.speedDrug, secondSwing: !!d.secondSwing, silver: d.silver, sword: d.sword, wornSword: d.wornSword, armor: d.armor, scope: d.scope, horse: d.horse,
       bubble: d.bubble, shieldItem: !!d.shieldItem, power: d.power, drug: d.drug, fought: d.fought, extraMoves: d.extraMoves, life: d.life || 0 };
     u.mesh = makeUnit(d.kind, d.owner);
     u.mesh.traverse(o => { o.userData.unitId = u.id; });
@@ -3515,7 +3533,7 @@
       if (!u) { u = unitFromData(d); return; }
       if (u.x !== d.x || u.z !== d.z) { u.x = d.x; u.z = d.z; hop(u.mesh, posOf(d.x, d.z), 320, 0.3); }
       const hadArmor = u.armor;
-      Object.assign(u, { hp: d.hp, moved: d.moved, done: d.done, hungry: d.hungry, irons: new Set(d.irons || []), gloves: !!d.gloves, speedDrug: !!d.speedDrug, secondSwing: !!d.secondSwing, silver: d.silver, sword: d.sword, wornSword: d.wornSword, armor: d.armor, scope: d.scope,
+      Object.assign(u, { hp: d.hp, moved: d.moved, done: d.done, hungry: d.hungry, irons: new Set(d.irons || []), ironBoots: !!d.ironBoots, herbTurn: d.herbTurn || null, gloves: !!d.gloves, speedDrug: !!d.speedDrug, secondSwing: !!d.secondSwing, silver: d.silver, sword: d.sword, wornSword: d.wornSword, armor: d.armor, scope: d.scope,
         bubble: d.bubble, shieldItem: !!d.shieldItem, power: d.power, drug: d.drug, fought: d.fought, extraMoves: d.extraMoves, life: d.life || 0, tools: new Set(d.tools || []) });
       if (d.horse && !u.horse) { u.horse = true; addHorse(u); }
       if (hadArmor !== u.armor) u.mesh.userData.bar.userData.max = maxHpU(u);
@@ -4352,7 +4370,7 @@
 
   // ---------- Inventory ----------
   let popInv = false;
-  const NEEDS_UNIT = ['scope', 'armor', 'shield', 'power', 'boots', 'sword', 'wornsword', 'horse', 'drug', 'speeddrug', 'gloves', 'silveraxe', 'axe', 'sickle', 'pickaxe', 'pole', ...IRON];
+  const NEEDS_UNIT = ['ironboots', 'herbs', 'scope', 'armor', 'shield', 'power', 'boots', 'sword', 'wornsword', 'horse', 'drug', 'speeddrug', 'gloves', 'silveraxe', 'axe', 'sickle', 'pickaxe', 'pole', ...IRON];
   function itemWhy(k) {
     if (k === 'seed') return P().farm ? 'Plant seeds by clicking your farm.' : 'Build a farm to plant seeds.';
     if (phase !== 'move' || busy) return 'Available during your moves.';
@@ -4366,6 +4384,9 @@
       if (u.kind === 'wolf' && !WOLF_OK.includes(k)) return "Wolves can't hold items. They can only take a demon drug or a shield or power-up scroll.";
       if ((k === 'sword' || k === 'wornsword') && u.kind === 'archer') return "Archers can't use a short sword.";
       if ((k === 'pickaxe' || k === 'ironpick') && u.kind === 'durnik') return 'Durnik refuses to use any pickaxe. He trusts only his own hammer.';
+      if (k === 'herbs' && u.herbTurn === turn) return `${label(u)} already used healing herbs this turn.`;
+      if (k === 'herbs' && u.hp >= maxHpU(u)) return `${label(u)} is already at full health.`;
+      if (k === 'ironboots' && u.ironBoots) return `${label(u)} already wears iron boots.`;
       if (k === 'ironaxe' && u.kind === 'grukk') return "Grukk hunts in forests. He has no use for an axe.";
       if (!FREE_ITEMS.includes(k) && slotsFull(u)) return `${label(u)} can't carry more (${slotsUsed(u)}/${capOf(u)} items). Remove one first.`;
       const has = { sword: u.sword || u.wornSword, wornsword: u.sword || u.wornSword, armor: u.armor, scope: u.scope, shield: u.bubble, power: u.power, silveraxe: u.silver || u.tools.has('axe'), axe: u.tools.has('axe') || u.silver, boots: u.extraMoves, horse: u.horse, drug: u.drug }[k] || (u.tools && u.tools.has(k));
@@ -4448,6 +4469,8 @@
       else if (a.item === 'wornsword') { u.wornSword = 0; if (selected === u) targets = atkOf(u) > 0 ? inRange(u) : []; }
       else if (a.item === 'scope') { u.scope = false; if (selected === u) targets = atkOf(u) > 0 ? inRange(u) : []; }
       else if (a.item === 'armor') { u.armor = false; u.hp = Math.max(1, u.hp - 2); u.mesh.userData.bar.userData.max = maxHpU(u); setBar(u.mesh.userData.bar, u.hp); }
+      else if (a.item === 'ironboots') { u.ironBoots = false; u.hp = Math.max(1, u.hp - 1); u.mesh.userData.bar.userData.max = maxHpU(u); setBar(u.mesh.userData.bar, u.hp); if (selected === u && !u.moved) moves = reachable(u); }
+      else if (a.item === 'herbs') { u.hp = Math.max(1, u.hp - 1); u.herbTurn = null; setBar(u.mesh.userData.bar, u.hp); }
       else if (a.item === 'shield') { u.bubble = false; u.shieldItem = false; }
       else if (a.item === 'power') { u.power = 0; if (selected === u) targets = atkOf(u) > 0 ? inRange(u) : []; }
       else if (a.item === 'speeddrug') { u.speedDrug = false; if (selected === u && !u.moved) moves = reachable(u); }
@@ -4771,8 +4794,14 @@
     }
     if (t.type === 'smith') {
       $('bpTitle').textContent = 'Blacksmith';
-      $('bpDesc').textContent = 'Turn resources into tools and weapons. Crafted items go to your stock.';
-      $('bpList').innerHTML = RECIPES.map((r, i) => row(ITEMS[r.item].name, ITEMS[r.item].desc, `You have ${items[r.item]}.`, r.cost, `craft-${i}`, 'Craft', craftBlock(r))).join('');
+      $('bpDesc').textContent = 'Forge tools, weapons and gear. Crafted items go to your inventory.';
+      $('bpop').classList.add('wide');
+      let html = '', group = null;
+      RECIPES.forEach((r, i) => {
+        if (r.group !== group) { group = r.group; html += `<div class="bp-sec">${group}</div>`; }
+        html += row(ITEMS[r.item].name, ITEMS[r.item].desc, items[r.item] ? `In inventory: ${items[r.item]}` : '', r.cost, `craft-${i}`, 'Craft', craftBlock(r));
+      });
+      $('bpList').innerHTML = html;
       $('bpMove').hidden = true;
       return;
     }

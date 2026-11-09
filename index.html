@@ -582,6 +582,7 @@
   };
   const DROP_TOOLS = ['axe', 'sickle', 'pickaxe', 'pole', 'boots'];
   const IRON = ['ironpick', 'ironaxe', 'ironrod', 'ironsickle'];
+  const GRUKK_HUNT = [1, 2];   // food Grukk brings back from a forest hunt
   // the black market: what it can stock, and the price in gold
   const MARKET_GOODS = { drug: 3, shield: 4, skeleton: 4, speeddrug: 6, power: 5, gloves: 30, ironpick: 12, ironaxe: 10, ironrod: 10, ironsickle: 10 };
   const MARKET_OFFERS = 5;
@@ -616,7 +617,7 @@
               ability: 'Water sphere', abilityText: 'A random unit without a bubble gets one. It blocks the next hit.' },
     orc:    { name: 'Ashen Orcs',         hero: 'grukk',
               perks: 'Every unit has +1 HP. Gather 1 less on everything.',
-              heroText: 'Grukk (6 HP, hits 2). Bandits he kills drop double loot.',
+              heroText: 'Grukk (6 HP, hits 2). Bandits he kills drop double loot. In a forest he hunts: 1–2 food a turn instead of wood, and forest finds like horses and bandit stashes can still turn up.',
               ability: 'Healing totem', abilityText: 'A healing totem rises next to Grukk for 2 turns. It can\'t move, and heals your units within 2 hexes for 2 HP each turn. Units in range never go hungry or starve, and can still gather.' },
     dwarf:  { name: 'Stoneheart Dwarves', hero: 'durnik',
               perks: 'Quarries and gold veins never roll 0, and gold rolls higher. Every 4th upkeep costs double food.',
@@ -1889,9 +1890,10 @@
     mine().forEach(u => {
       if (turn === 1 && !bonusPass) return;   // nobody has worked yet: everyone starts with exactly the starting stock
       const ironHere = [...(u.irons || [])].find(k => ITEMS[k].tiles.includes(tileAt(u.x, u.z).type));
-      if (!UNITS[u.kind].gathers && !(UNITS[u.kind].hero && ironHere)) return;   // iron tools let any hero gather on their tiles
+      const hunting = u.kind === 'grukk' && tileAt(u.x, u.z).type === 'forest';   // Grukk hunts game in forests instead of chopping
+      if (!UNITS[u.kind].gathers && !(UNITS[u.kind].hero && ironHere) && !hunting) return;   // iron tools let any hero gather on their tiles
       const t = tileAt(u.x, u.z), ty = TYPES[t.type];
-      const entry = { who: label(u), type: t.type, name: ty.name, res: ty.res, n: 0, notes: [] };
+      const entry = { who: label(u), type: t.type, name: hunting ? 'Forest · hunting' : ty.name, res: hunting ? 'food' : ty.res, n: 0, notes: [] };
       report.push(entry);
       if (u.fought) { u.fought = false; entry.skip = true; entry.notes.push({ cls: 'dim', text: 'Fought last turn instead of gathering.' }); return; }
       if (t.burn) { entry.skip = true; entry.notes.push({ cls: 'bad', text: 'This tile is on fire. Nothing can be gathered until it burns out.' }); floatAt(u.mesh.position, 'On fire!', '#ff7a3a'); return; }
@@ -1917,6 +1919,14 @@
         return;
       }
       const type = t.type;
+      if (hunting) {   // 1-2 food from the hunt, no wood; forest finds below still apply
+        const food = randInt(GRUKK_HUNT[0], GRUKK_HUNT[1]), gain = P().bounty && !bonusPass ? food * 2 : food;
+        entry.n = gain;
+        entry.notes.push({ cls: 'split', text: `Grukk hunts instead of chopping: +${food} food${gain !== food ? `, doubled to +${gain} by the bountiful harvest` : ''}.` });
+        stock.food += gain; got.push(['food', gain]);
+        floatAt(u.mesh.position, `Hunt: +${gain} Food`, RES_COLOR.food);
+        pulse('food', 'bump');
+      } else {
       const toolKey = [...u.tools].find(k => ITEMS[k].tiles.includes(type));   // at most one tool can apply per gather
       const boosted = !!toolKey;
       const silver = u.silver && ITEMS.silveraxe.tiles.includes(type);
@@ -1950,6 +1960,7 @@
         pulse(ty.res, 'bump');
       } else {
         floatAt(u.mesh.position, 'Found nothing', '#a59d8b');
+      }
       }
       const ev = rollEvent(type);
       if (ev) {
@@ -2789,6 +2800,7 @@
     if (k === 'speeddrug') return !selected.speedDrug;
     if (k === 'gloves') return !selected.gloves;
     if ((k === 'pickaxe' || k === 'ironpick') && selected.kind === 'durnik') return false;   // Durnik won't touch a pickaxe
+    if (k === 'ironaxe' && selected.kind === 'grukk') return false;   // Grukk hunts in forests, he doesn't chop
     if (IRON.includes(k)) return (UNITS[selected.kind].gathers || !!UNITS[selected.kind].hero) && !hasToolFor(selected, k);
     if (!UNITS[selected.kind].gathers) return false;
     if (hasToolFor(selected, k)) return false;
@@ -3086,6 +3098,7 @@
       const irons = [...(u.irons || [])];
       const gatherLine = def.gathers
         ? (u.kind === 'durnik' ? 'Can gather on any resource tile, and digs twice on quarries and gold veins.' : 'Can gather on any resource tile.')
+        : u.kind === 'grukk' ? `Hunts in forests: ${GRUKK_HUNT[0]}–${GRUKK_HUNT[1]} food a turn instead of wood, and can still make forest finds.${irons.length ? ` Also gathers on ${irons.map(k => ITEMS[k].where).join(' and ')} with the ${irons.map(k => ITEMS[k].short).join(' and ')}.` : ''}`
         : irons.length ? `Only gathers on ${irons.map(k => ITEMS[k].where).join(' and ')}, thanks to the ${irons.map(k => ITEMS[k].short).join(' and ')}.`
         : "Can't gather. An iron tool from the black market would let them gather on its tiles.";
       skills = `<div class="uc-sec"><h4>Skills</h4>
@@ -4353,6 +4366,7 @@
       if (u.kind === 'wolf' && !WOLF_OK.includes(k)) return "Wolves can't hold items. They can only take a demon drug or a shield or power-up scroll.";
       if ((k === 'sword' || k === 'wornsword') && u.kind === 'archer') return "Archers can't use a short sword.";
       if ((k === 'pickaxe' || k === 'ironpick') && u.kind === 'durnik') return 'Durnik refuses to use any pickaxe. He trusts only his own hammer.';
+      if (k === 'ironaxe' && u.kind === 'grukk') return "Grukk hunts in forests. He has no use for an axe.";
       if (!FREE_ITEMS.includes(k) && slotsFull(u)) return `${label(u)} can't carry more (${slotsUsed(u)}/${capOf(u)} items). Remove one first.`;
       const has = { sword: u.sword || u.wornSword, wornsword: u.sword || u.wornSword, armor: u.armor, scope: u.scope, shield: u.bubble, power: u.power, silveraxe: u.silver || u.tools.has('axe'), axe: u.tools.has('axe') || u.silver, boots: u.extraMoves, horse: u.horse, drug: u.drug }[k] || (u.tools && u.tools.has(k));
       if (has || (k === 'speeddrug' && u.speedDrug) || (k === 'gloves' && u.gloves)) return `${label(u)} already has one.`;
